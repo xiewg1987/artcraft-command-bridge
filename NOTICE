@@ -1,0 +1,16 @@
+artcraft-command-bridge
+Copyright (c) 2026 xiewg1987
+
+This is an independent community project. It is not affiliated with, endorsed
+by, or sponsored by the ArtCraft Team.
+
+"ArtCraft", "PhotoCraft", "LightCraft", "VectorCraft", "FilmCraft",
+"DesignCraft", "GridCraft", "SoundCraft", "DeckCraft", "WordCraft",
+"CADCraft", "EffectCraft", "FigCraft" and "PdfCraft" are trademarks of the
+ArtCraft Team and are used here only to identify the software this project
+interfaces with.
+
+The Crafting Apps themselves are open source (MIT OR Apache-2.0) and live at
+https://github.com/storytold. This project contains no ArtCraft source code.
+It only invokes the apps' published command-line interfaces as separate
+processes, exactly as a human operator would from a shell.

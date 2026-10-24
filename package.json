@@ -1,0 +1,42 @@
+{
+  "name": "artcraft-command-bridge",
+  "version": "1.0.0",
+  "description": "One MCP server for the 13 ArtCraft Crafting Apps — 5 tools instead of 799, so the tool schemas stop eating your context.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "artcraft",
+    "figcraft",
+    "photocraft",
+    "vectorcraft",
+    "lightcraft",
+    "designcraft",
+    "deterministic",
+    "cli"
+  ],
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "server.js",
+  "bin": {
+    "artcraft-command-bridge": "server.js"
+  },
+  "files": [
+    "server.js",
+    "lib/",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiewg1987/artcraft-command-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xiewg1987/artcraft-command-bridge/issues"
+  },
+  "homepage": "https://github.com/xiewg1987/artcraft-command-bridge#readme"
+}
