@@ -17,13 +17,13 @@
 
 'use strict';
 
-const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
-const path = require('path');
 
 const { APPS, APP_BY_ID } = require('./lib/apps');
 const { resolveCli, explain } = require('./lib/resolve');
+const { execFile } = require('./lib/exec');
+const { getRegistry } = require('./lib/registry');
 
 /* ---------------------------------------------------------------- helpers */
 
@@ -42,35 +42,6 @@ function cliFor(app) {
     }
   }
   return cliCache.get(app.id);
-}
-
-function execFile(file, args, { timeoutMs = 120000 } = {}) {
-  return new Promise((resolve) => {
-    let p;
-    try {
-      p = spawn(file, args, { windowsHide: true });
-    } catch (e) {
-      return resolve({ code: -1, stdout: '', stderr: `spawn failed: ${e.message}`, argv: [path.basename(file), ...args] });
-    }
-    let stdout = '', stderr = '', done = false;
-    const argv = [path.basename(file), ...args];
-    const timer = setTimeout(() => {
-      if (done) return;
-      done = true;
-      try { p.kill(); } catch (e) {}
-      resolve({ code: -2, stdout, stderr: stderr + `\n[bridge] timed out after ${timeoutMs}ms`, timedOut: true, argv });
-    }, timeoutMs);
-    p.stdout.on('data', (d) => { stdout += d.toString('utf8'); });
-    p.stderr.on('data', (d) => { stderr += d.toString('utf8'); });
-    p.on('error', (e) => {
-      if (done) return; done = true; clearTimeout(timer);
-      resolve({ code: -1, stdout, stderr: stderr + `spawn error: ${e.message}`, argv });
-    });
-    p.on('close', (code) => {
-      if (done) return; done = true; clearTimeout(timer);
-      resolve({ code, stdout, stderr, argv });
-    });
-  });
 }
 
 async function versionOf(app) {
@@ -93,46 +64,6 @@ function parseJsonLines(text) {
       try { out.push(JSON.parse(t)); continue; } catch (e) { /* not json */ }
     }
     out.push(t);
-  }
-  return out;
-}
-
-/** Parse a JSON array out of CLI stdout, tolerating a BOM or leading noise. */
-function tryParseJsonArray(text) {
-  if (!text) return null;
-  const s = text.replace(/^\uFEFF/, '').trim();
-  const start = s.indexOf('[');
-  if (start < 0) return null;
-  const end = s.lastIndexOf(']');
-  if (end <= start) return null;
-  try {
-    const j = JSON.parse(s.slice(start, end + 1));
-    return Array.isArray(j) ? j : null;
-  } catch (e) { return null; }
-}
-
-/**
- * Parse the plain-text command tables some apps print instead of JSON:
- *   "file.new — New Presentation: {theme?: name, size?: [w,h] pt}"   (DeckCraft)
- *   "session.new      New...      File"                               (SoundCraft)
- */
-function parseTextCommands(text) {
-  const out = [];
-  for (const line of (text || '').split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    const m = line.match(/^(\S+)[ \t]+(.*)$/);
-    if (!m) continue;
-    const id = m[1];
-    if (!/^[A-Za-z][A-Za-z0-9_.-]*$/.test(id)) continue;
-    const rest = m[2].trim();
-    const pm = rest.match(/\{.*\}/);
-    out.push({
-      id,
-      label: (pm ? rest.slice(0, pm.index) : rest).replace(/[\u2014\u2013:-]\s*$/, '').trim() || null,
-      params: pm ? pm[0] : null,
-      enabled: null,
-      disabledReason: null,
-    });
   }
   return out;
 }
@@ -178,13 +109,15 @@ const TOOLS = [
     name: 'artcraft_commands',
     description:
       "List an app's stable command IDs with their parameter documentation (from the app's own command registry). " +
-      'Use this to discover exact command IDs and parameter names before calling artcraft_run.',
+      'The registry is cached locally on first read, so repeat calls do not spawn the CLI; pass refresh:true after ' +
+      'an app update. Use this to discover exact command IDs and parameter names before calling artcraft_run.',
     inputSchema: {
       type: 'object',
       properties: {
         app: { type: 'string', description: 'App id, e.g. figcraft, photocraft, vectorcraft.' },
         filter: { type: 'string', description: 'Optional substring filter on id or label (applied here, not by the app).' },
         limit: { type: 'number', description: 'Max commands to return (default 60).' },
+        refresh: { type: 'boolean', description: 'Re-read the registry from the CLI and rewrite the local cache (default false).' },
       },
       required: ['app'],
       additionalProperties: false,
@@ -284,66 +217,28 @@ async function callTool(name, args) {
       const filter = String(args.filter || '').toLowerCase();
       const limit = Math.max(1, Math.min(500, args.limit ?? 60));
 
-      // Apps disagree on how the registry is exposed:
-      //   JSON      — PhotoCraft/VectorCraft/FigCraft/...: `commands --json`
-      //   plain JSON— CADCraft/DesignCraft: `commands` (no --json)
-      //   text table— DeckCraft/SoundCraft
-      //   tools     — PdfCraft has no `commands` at all: `tools`
-      // So try each shape and normalise here.
-      let list = null;
-      let argv = null;
-      let source = null;
+      // The registry lives on disk after the first read; a cache hit never
+      // spawns the CLI. The cache is keyed by the CLI's path, mtime and size,
+      // so an app update invalidates it automatically.
+      const entry = await getRegistry(app, cli, { refresh: args.refresh === true });
+      const norm = entry.commands;
+      const cache = {
+        hit: entry.cached,
+        file: entry.file,
+        fetched_at: entry.fetchedAt,
+        ...(entry.stale ? { stale: true } : {}),
+      };
 
-      for (const a of [['commands', '--json'], ['commands']]) {
-        const r = await execFile(cli, a, { timeoutMs: 60000 });
-        if (r.code !== 0) continue;
-        const parsed = tryParseJsonArray(r.stdout);
-        if (parsed && parsed.length) { list = parsed; argv = r.argv; source = 'json'; break; }
-      }
-
-      if (!list && key === 'pdfcraft') {
-        const r = await execFile(cli, ['tools'], { timeoutMs: 60000 });
-        const parsed = tryParseJsonArray(r.stdout);
-        if (parsed) {
-          list = parsed.map((t) => ({
-            id: t.name,
-            label: t.command ? `command: ${t.command}` : null,
-            params: t.input_schema ? JSON.stringify(t.input_schema) : null,
-            enabled: null,
-            disabledReason: null,
-            description: t.description,
-            read_only: t.read_only ?? null,
-          }));
-          argv = r.argv; source = 'tools';
-        }
-      }
-
-      if (!list) {
-        for (const a of [['commands'], ['commands', ...(args.filter ? [String(args.filter)] : [])]]) {
-          const r = await execFile(cli, a, { timeoutMs: 60000 });
-          if (r.code !== 0 || !r.stdout.trim()) continue;
-          const parsed = parseTextCommands(r.stdout);
-          if (parsed.length) { list = parsed; argv = r.argv; source = 'text'; break; }
-        }
-      }
-
-      if (!list) {
-        const r = await execFile(cli, ['--help'], { timeoutMs: 30000 });
+      if (!norm.length) {
         return {
           app: key,
+          source: entry.source,
+          cache,
           note: 'This app exposes no command registry; use artcraft_cli / artcraft_help with its subcommands directly.',
-          usage: (r.stdout || r.stderr || '').slice(0, 4000),
+          usage: entry.usage || '',
         };
       }
 
-      const norm = list.map((c) => ({
-        id: c.id,
-        label: c.label ?? null,
-        params: c.params ?? null,
-        enabled: c.enabled ?? null,
-        disabled_reason: c.disabledReason ?? null,
-        ...(c.description ? { description: c.description } : {}),
-      }));
       const hit = filter
         ? norm.filter((c) => String(c.id).toLowerCase().includes(filter)
           || String(c.label || '').toLowerCase().includes(filter)
@@ -351,8 +246,8 @@ async function callTool(name, args) {
         : norm;
       return {
         app: key,
-        source,
-        argv,
+        source: entry.source,
+        cache,
         total: norm.length,
         matched: hit.length,
         truncated: hit.length > limit,

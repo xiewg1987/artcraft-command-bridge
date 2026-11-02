@@ -7,10 +7,10 @@ separate tool. Registering all 13 of them costs **799 tools / 547 KB of schema �
 140k tokens of permanently resident context**, and that payload is re-sent on
 *every* request.
 
-This bridge drives the apps' CLIs instead and exposes **5 tools / 3.5 KB**.
+This bridge drives the apps' CLIs instead and exposes **5 tools / 3.7 KB**.
 
 ```
-799 tools · 547.3 KB · ~140,000 tokens   →   5 tools · 3.5 KB · ~900 tokens
+799 tools · 547.3 KB · ~140,000 tokens   →   5 tools · 3.7 KB · ~950 tokens
 ```
 
 ---
@@ -70,7 +70,7 @@ which exposes a core set plus `tool_search`/`tool_call`); the other twelve rejec
 | Tool | What it does |
 |---|---|
 | `artcraft_apps` | The 13 apps: purpose, version, install status, and how their `run` argv is built. Start here. |
-| `artcraft_commands` | An app's stable command IDs with parameter docs. Filter by substring. |
+| `artcraft_commands` | An app's stable command IDs with parameter docs, served from a local cache. Filter by substring. |
 | `artcraft_run` | Execute one or more command IDs in order. The deterministic path. |
 | `artcraft_cli` | Escape hatch — run any CLI subcommand verbatim (`export`, `render`, `convert`, `info`, `batch`). |
 | `artcraft_help` | An app's own `--help` text. |
@@ -134,6 +134,31 @@ The command registry is exposed differently too, so the bridge normalises it:
 Apps that are not installed are reported as such and skipped — the bridge never
 fails as a whole because one app is missing.
 
+## Registry cache
+
+`artcraft_commands` does not spawn the CLI on every call. The first read of an
+app pulls its registry once and writes it to a per-machine cache; later reads
+are served from disk. The cache key is the CLI's **path + mtime + size**, so
+updating an app invalidates its entry automatically.
+
+```sh
+artcraft-sync-registry                 # installed global CLI
+node tools/sync-registry.js            # or from a checkout
+node tools/sync-registry.js --check    # only fill missing/stale entries
+node tools/sync-registry.js --app figcraft pdfcraft
+node tools/sync-registry.js --clear    # delete the cache
+```
+
+Pass `refresh: true` to `artcraft_commands` to re-read one app. Override the
+location with `ARTCRAFT_CACHE_DIR`; the default is
+`%LOCALAPPDATA%\artcraft-command-bridge\registry` on Windows,
+`~/Library/Caches/artcraft-command-bridge/registry` on macOS, and
+`$XDG_CACHE_HOME/artcraft-command-bridge/registry` (or `~/.cache/...`) on Linux.
+
+A cache hit removes the CLI process from discovery, but it does not shrink the
+response: the token cost is the returned command list, not where it was read
+from. Use `filter` and `limit` to keep that list small.
+
 ## Why not an existing tool?
 
 - **[eznix86/mcp-gateway](https://github.com/eznix86/mcp-gateway)** (MIT) — a
@@ -153,9 +178,11 @@ fails as a whole because one app is missing.
 ## Development
 
 ```sh
+node tools/sync-registry.js       # pull command registries into the local cache
 node tools/probe-mcp.js           # probe every app's MCP handshake + tool count
 node tools/schema-size.js         # measure schema weight, refresh registry snapshots
 node tools/agg-test.js            # end-to-end self-test of the bridge
+node tools/registry-cache-test.js # verify a cache hit does not re-read the CLI
 node tools/per-app-verify.js      # verify each app's run argv is accepted
 node tools/cursor-launch-check.js # start the bridge the way a client would
 ```

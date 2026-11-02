@@ -18,11 +18,18 @@
   "type": "commonjs",
   "main": "server.js",
   "bin": {
-    "artcraft-command-bridge": "server.js"
+    "artcraft-command-bridge": "server.js",
+    "artcraft-sync-registry": "tools/sync-registry.js"
+  },
+  "scripts": {
+    "sync-registry": "node tools/sync-registry.js",
+    "test": "node tools/agg-test.js",
+    "test:registry": "node tools/registry-cache-test.js"
   },
   "files": [
     "server.js",
     "lib/",
+    "tools/sync-registry.js",
     "README.md",
     "README.zh-CN.md",
     "LICENSE",

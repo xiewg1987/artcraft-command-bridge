@@ -5,10 +5,10 @@
 每个 Crafting App 都自带 MCP 服务器，把每一条引擎命令都摊成独立工具。13 个全注册 =
 **799 个工具 / 547 KB schema ≈ 14 万 token 常驻上下文**，而且这份载荷**每轮请求都要重发一遍**。
 
-这个桥接器改为直接驱动各 app 的 CLI，只暴露 **5 个工具 / 3.5 KB**。
+这个桥接器改为直接驱动各 app 的 CLI，只暴露 **5 个工具 / 3.7 KB**。
 
 ```
-799 工具 · 547.3 KB · ~140,000 token   →   5 工具 · 3.5 KB · ~900 token
+799 工具 · 547.3 KB · ~140,000 token   →   5 工具 · 3.7 KB · ~950 token
 ```
 
 ---
@@ -57,7 +57,7 @@ Crafting Apps 本身已经有一套非常适合做这件事的模型：
 | 工具 | 作用 |
 |---|---|
 | `artcraft_apps` | 13 个 app 的用途、版本、安装状态、run 参数风格。从这里开始。 |
-| `artcraft_commands` | 某 app 的稳定命令 ID + 参数说明，支持子串过滤。 |
+| `artcraft_commands` | 某 app 的稳定命令 ID + 参数说明，从本地缓存读取，支持子串过滤。 |
 | `artcraft_run` | 按 ID 顺序执行一条或多条命令。确定性干活的路子。 |
 | `artcraft_cli` | 逃生舱 —— 透传任意子命令（`export`/`render`/`convert`/`info`/`batch`）。 |
 | `artcraft_help` | 某 app 自己的 `--help` 全文。 |
@@ -119,6 +119,22 @@ Crafting Apps 本身已经有一套非常适合做这件事的模型：
 
 没装的 app 会被标成未安装并跳过 —— 少装一个不会让整个桥接器挂掉。
 
+## 注册表缓存
+
+`artcraft_commands` 不再每次调用都启动 CLI。每个 app 第一次读取时拉一次注册表并写到本机缓存，之后直接从磁盘读。缓存 key 是 CLI 的**路径 + mtime + size**，app 升级后会自动失效。
+
+```sh
+artcraft-sync-registry                 # 全局安装后的命令
+node tools/sync-registry.js            # 或在仓库里运行
+node tools/sync-registry.js --check    # 只补缺失/过期的
+node tools/sync-registry.js --app figcraft pdfcraft
+node tools/sync-registry.js --clear    # 清空缓存
+```
+
+单个 app 需要强制重读时，给 `artcraft_commands` 传 `refresh: true`。缓存目录可用 `ARTCRAFT_CACHE_DIR` 覆盖；默认位置：Windows `%LOCALAPPDATA%\artcraft-command-bridge\registry`，macOS `~/Library/Caches/artcraft-command-bridge/registry`，Linux `$XDG_CACHE_HOME/artcraft-command-bridge/registry`（或 `~/.cache/...`）。
+
+缓存命中省掉的是 CLI 进程，不会缩小返回内容：token 消耗取决于返回的命令列表，而不是它从哪里读出来。用 `filter` 和 `limit` 控制列表大小。
+
 ## 和现有方案的差别
 
 - **[eznix86/mcp-gateway](https://github.com/eznix86/mcp-gateway)**（MIT）—— 思路一样的通用网关，但它聚合的是 **MCP 服务器层**，那 13 个 Crafting App 服务器还是得作为上游进程常驻，而且它的 `search` 是文本相似度，不是注册表精确查。
@@ -128,9 +144,11 @@ Crafting Apps 本身已经有一套非常适合做这件事的模型：
 ## 开发
 
 ```sh
+node tools/sync-registry.js       # 把命令注册表拉到本地缓存
 node tools/probe-mcp.js           # 探测每个 app 的 MCP 握手 + 工具数
 node tools/schema-size.js         # 量 schema 体量，刷新 registry 快照
 node tools/agg-test.js            # 桥接器端到端自测
+node tools/registry-cache-test.js # 验证缓存命中不再读 CLI
 node tools/per-app-verify.js      # 验证各 app 的 run 参数是否被引擎接受
 node tools/cursor-launch-check.js # 按客户端的方式启动桥接器
 ```
