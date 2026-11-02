@@ -189,6 +189,8 @@ node tools/cursor-launch-check.js # start the bridge the way a client would
 
 Zero runtime dependencies; Node ≥ 18.
 
+Design notes: [token optimization plan](docs/token-optimization-plan.md) (proposal, not implemented).
+
 ## License
 
 MIT — see [LICENSE](LICENSE). See [NOTICE](NOTICE) for trademark attribution.
