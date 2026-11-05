@@ -1,17 +1,20 @@
 # artcraft-command-bridge
 
-**One MCP server for the 13 [ArtCraft Crafting Apps](https://getartcraft.com/apps) — 5 tools instead of 799.**
+**One MCP server for the 15 [ArtCraft Crafting Apps](https://getartcraft.com/apps) — 5 tools instead of 866.**
 
 Each Crafting App ships its own MCP server that exposes every engine command as a
-separate tool. Registering all 13 of them costs **799 tools / 547 KB of schema ≈
-140k tokens of permanently resident context**, and that payload is re-sent on
+separate tool. Registering all 15 of them costs **866 tools / 630.6 KB of schema ≈
+161k tokens of permanently resident context**, and that payload is re-sent on
 *every* request.
 
 This bridge drives the apps' CLIs instead and exposes **5 tools / 3.7 KB**.
 
 ```
-799 tools · 547.3 KB · ~140,000 tokens   →   5 tools · 3.7 KB · ~950 tokens
+866 tools · 630.6 KB · ~161,000 tokens   →   5 tools · 3.7 KB · ~950 tokens
 ```
+
+Scope: the 15 command-driven Crafting Apps. Craft Anything is an agent
+front-end with its own tool protocol, so the bridge does not wrap it.
 
 ---
 
@@ -29,14 +32,14 @@ The Crafting Apps already share one model that is perfect for this:
 - `commands` — lists stable command IDs with their parameters
 - `run` — executes those IDs
 
-Measured across the 13 apps, that is **7027 command IDs**. The 799 tools the
+Measured across the 15 apps, that is **7606 command IDs**. The 866 tools the
 apps' own MCP servers expose are only a subset view of the same registry. So
-the tools do not need to be flattened into 799 separate entries — they need a
+the tools do not need to be flattened into 866 separate entries — they need a
 **directory** and a **dispatcher**, which is what this is.
 
 Only PdfCraft ships an on-demand mode of its own (`pdfcraft-cli mcp --compact`,
-which exposes a core set plus `tool_search`/`tool_call`); the other twelve reject
-`--compact` outright, so there was no unified switch to simply turn on.
+which exposes a core set plus `tool_search`/`tool_call`); the other fourteen have no
+equivalent `--compact` mode, so there was no unified switch to simply turn on.
 
 ## Quick start
 
@@ -69,7 +72,7 @@ which exposes a core set plus `tool_search`/`tool_call`); the other twelve rejec
 
 | Tool | What it does |
 |---|---|
-| `artcraft_apps` | The 13 apps: purpose, version, install status, and how their `run` argv is built. Start here. |
+| `artcraft_apps` | The 15 apps: purpose, version, install status, and how their `run` argv is built. Start here. |
 | `artcraft_commands` | An app's stable command IDs with parameter docs, served from a local cache. Filter by substring. |
 | `artcraft_run` | Execute one or more command IDs in order. The deterministic path. |
 | `artcraft_cli` | Escape hatch — run any CLI subcommand verbatim (`export`, `render`, `convert`, `info`, `batch`). |
@@ -92,6 +95,15 @@ which exposes a core set plus `tool_search`/`tool_call`); the other twelve rejec
 
 // export it (not a command ID — use the escape hatch)
 { "app": "figcraft", "args": ["export", "hero.figcraft", "-o", "hero.png", "--format", "png", "--node", "Hero"] }
+
+// paint a texture set and save the native project (batch-json style)
+{
+  "app": "texturecraft",
+  "steps": [
+    { "id": "layer.add.fill", "params": { "name": "Base", "color": "#c94f3d" } }
+  ],
+  "output": "D:/out/armor.tcraft"
+}
 ```
 
 ## How it works
@@ -107,6 +119,7 @@ translates one uniform `{ id, params }` model into each app's own syntax:
 | positional `<id> <json>` | LightCraft, EffectCraft |
 | script file `run <script.json>` | FigCraft (`{command, params}`) |
 | script file `run <script.jsonl>` | FilmCraft (`{id, params}`) |
+| batch file `batch <script.json>` | TextureCraft, MaterialCraft (`{open, steps, save}`) |
 | `run <tool> key=value` | PdfCraft (tool names, not command IDs) |
 
 The command registry is exposed differently too, so the bridge normalises it:
@@ -114,8 +127,8 @@ The command registry is exposed differently too, so the bridge normalises it:
 | registry shape | apps |
 |---|---|
 | `commands --json` | PhotoCraft, VectorCraft, FigCraft, GridCraft, LightCraft, EffectCraft, FilmCraft, WordCraft |
-| `commands` (plain JSON) | CADCraft, DesignCraft — their `--json` flag is parsed as a filter and returns `[]` |
-| plain-text table | DeckCraft, SoundCraft |
+| `commands` (plain JSON) | CADCraft, DesignCraft (their `--json` is parsed as a filter and returns `[]`); MaterialCraft rejects `--json` as an unknown option |
+| plain-text table | DeckCraft, SoundCraft, TextureCraft |
 | `tools` subcommand | PdfCraft has no `commands` at all |
 
 ## Finding the CLIs
@@ -163,7 +176,7 @@ from. Use `filter` and `limit` to keep that list small.
 
 - **[eznix86/mcp-gateway](https://github.com/eznix86/mcp-gateway)** (MIT) — a
   general-purpose gateway with the same idea, but it aggregates *MCP servers*,
-  so the 13 Crafting App servers still have to be running as upstream
+  so the 15 Crafting App servers still have to be running as upstream
   processes, and its `search` is text-similarity rather than an exact
   registry lookup.
 - **[ai-2070/claude-storytold-skills](https://github.com/ai-2070/claude-storytold-skills)**

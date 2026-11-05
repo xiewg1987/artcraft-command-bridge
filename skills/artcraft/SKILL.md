@@ -4,15 +4,16 @@ description: >
   Route creative-file work to the right ArtCraft app and drive it through the
   artcraft-command-bridge MCP (5 tools). Use for photo/RAW editing, logos and vector art,
   UI screens, page layout, spreadsheets, documents, slide decks, audio, video, motion
-  graphics, CAD, and PDF operations with PhotoCraft, LightCraft, VectorCraft, FigCraft,
-  DesignCraft, GridCraft, WordCraft, DeckCraft, SoundCraft, FilmCraft, EffectCraft,
-  CADCraft, or PdfCraft — including "which app should I use?". Router only: discover
+  graphics, CAD, 3D texture painting, procedural materials, and PDF operations with
+  PhotoCraft, LightCraft, VectorCraft, FigCraft, DesignCraft, GridCraft, WordCraft,
+  DeckCraft, SoundCraft, FilmCraft, EffectCraft, CADCraft, TextureCraft,
+  MaterialCraft, or PdfCraft — including "which app should I use?". Router only: discover
   commands live with artcraft_commands; do not preload per-app catalogs.
 ---
 
 # ArtCraft — pick the app, then drive the bridge
 
-All 13 ArtCraft apps are deterministic headless engines. They are the right tool for
+All 15 ArtCraft apps are deterministic headless engines. They are the right tool for
 exact, repeatable creative output — not image or video generation models.
 
 ## Core rules
@@ -43,6 +44,8 @@ and CLI path.
 | **lightcraft** | Camera RAW, culling, non-destructive develop settings, batch variants | pixel compositing (photocraft) |
 | **vectorcraft** | Paths/bezier, logos, icons, illustration, print-ready vector | pixel retouch (photocraft) |
 | **figcraft** | UI screens, frames, components, design tokens, prototypes | print/page layout (designcraft) |
+| **texturecraft** | 3D texture painting on meshes: texture sets, paint/fill layers, smart materials, bake and export maps | procedural material graphs (materialcraft), flat image retouch (photocraft) |
+| **materialcraft** | Procedural PBR materials: node graphs, cook, render, export maps | painting/baking on a specific mesh (texturecraft) |
 | **designcraft** | Multi-page print: brochures, newsletters, master pages, PDF/X | single-page UI (figcraft), slides (deckcraft) |
 | **gridcraft** | Tabular data, formulas, charts, xlsx/csv | document prose (wordcraft) |
 | **wordcraft** | Long-form documents, reports, letters, docx | slide decks (deckcraft), page layout (designcraft) |
@@ -59,6 +62,8 @@ and CLI path.
   RAW → lightcraft.
 - "Design" that is a screen → figcraft; a printed page → designcraft; a slide → deckcraft.
 - Animated but not live-action → effectcraft; live-action timeline → filmcraft.
+- A model needs painted/baked texture maps → texturecraft; a reusable procedural PBR
+  material → materialcraft.
 - A PDF is the **input** → pdfcraft. A PDF is just an **export format** → use the source
   app's export.
 - Data + prose in one deliverable → build the data in gridcraft, then embed/convert with
@@ -110,6 +115,12 @@ and CADCraft accept `input` but not `output`. For those, either drive the app wi
 `artcraft_cli` using its own `--in`/`--save`/`--out` flags, or run the command sequence
 and then a separate export/convert call.
 
+TextureCraft and MaterialCraft use a **batch JSON** script and accept both: `input` is
+an existing native project (`.tcraft` / `.sbs` / `.mcraft`), and `output` saves the
+native project. To start from a mesh or a new project, use `artcraft_cli` first
+(`new builtin:cube out.tcraft`, `new empty out.sbs`). Exported PNG/EXR maps are a
+separate `export` call through `artcraft_cli`.
+
 ## 5. Escape hatch — export, render, convert, info, batch
 
 `artcraft_cli` passes argv verbatim (no shell interpretation). Use it for:
@@ -151,5 +162,5 @@ This skill stays a router. When a task lands on one app:
 3. Only if the app becomes a repeated workload, add
    `skills/artcraft-<app>/SKILL.md` with **tested** recipes, formats, and pitfalls.
 
-Do not create 13 app skills up front, and do not read whole 2 MB command registries —
+Do not create 15 app skills up front, and do not read whole 2 MB command registries —
 filter them.

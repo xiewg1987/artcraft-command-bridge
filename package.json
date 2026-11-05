@@ -1,7 +1,7 @@
 {
   "name": "artcraft-command-bridge",
-  "version": "1.0.0",
-  "description": "One MCP server for the 13 ArtCraft Crafting Apps — 5 tools instead of 799, so the tool schemas stop eating your context.",
+  "version": "1.1.0",
+  "description": "One MCP server for the 15 ArtCraft Crafting Apps — 5 tools instead of 866, so the tool schemas stop eating your context.",
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -11,6 +11,8 @@
     "vectorcraft",
     "lightcraft",
     "designcraft",
+    "texturecraft",
+    "materialcraft",
     "deterministic",
     "cli"
   ],

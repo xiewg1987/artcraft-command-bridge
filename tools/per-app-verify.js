@@ -1,9 +1,9 @@
 // Verify each app's `run` argv translation against its real engine.
 const { spawn } = require('child_process');
+const { APPS: APP_DEFS } = require('../lib/apps');
 
 const SERVER = require('path').join(__dirname, '..', 'server.js');
-const APPS = ['photocraft', 'lightcraft', 'vectorcraft', 'designcraft', 'gridcraft', 'soundcraft',
-  'deckcraft', 'wordcraft', 'cadcraft', 'effectcraft', 'filmcraft', 'figcraft', 'pdfcraft'];
+const APPS = APP_DEFS.map((a) => a.id);
 
 function start() {
   const p = spawn('node', [SERVER], { stdio: ['pipe', 'pipe', 'pipe'] });

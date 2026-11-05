@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * artcraft-command-bridge — one MCP server for the 13 ArtCraft Crafting Apps.
+ * artcraft-command-bridge — one MCP server for the 15 ArtCraft Crafting Apps.
  *
  * Each Crafting App ships its own MCP server that exposes every engine
- * command as a separate tool (799 tools / 547 KB of schema in total). MCP
+ * command as a separate tool (866 tools / 630.6 KB of schema in total). MCP
  * clients register a server's tools in full, and that schema is re-sent on
- * every request — so connecting the 13 apps directly costs ~140k tokens of
+ * every request — so connecting the 15 apps directly costs ~161k tokens of
  * permanently resident context.
  *
  * This bridge talks to the apps' CLIs instead of their MCP servers and
@@ -56,6 +56,15 @@ async function versionOf(app) {
 }
 
 function parseJsonLines(text) {
+  const trimmed = (text || '').trim();
+  if (trimmed) {
+    try {
+      // One pretty-printed document (e.g. a TextureCraft/MaterialCraft batch
+      // result) must be parsed as a whole; line splitting would keep braces.
+      return [JSON.parse(trimmed)];
+    } catch (e) { /* fall through to line-delimited JSON */ }
+  }
+
   const out = [];
   for (const line of text.split(/\r?\n/)) {
     const t = line.trim();
@@ -84,7 +93,7 @@ function requireApp(id) {
   return { key, app, cli };
 }
 
-/** Remove the throwaway script files that script-style apps need (FigCraft/FilmCraft). */
+/** Remove the throwaway script files that script-style apps need (FigCraft/FilmCraft/TextureCraft/MaterialCraft). */
 function cleanupTempFiles(argv) {
   const tmp = os.tmpdir();
   for (const a of argv) {
@@ -101,8 +110,9 @@ const TOOLS = [
     name: 'artcraft_apps',
     description:
       'List the ArtCraft applications available locally (PhotoCraft, LightCraft, VectorCraft, DesignCraft, GridCraft, ' +
-      'SoundCraft, DeckCraft, WordCraft, CADCraft, EffectCraft, FilmCraft, FigCraft, PdfCraft) with their purpose, ' +
-      'version, install status and how their `run` argv is built. Start here to pick the right app for a task.',
+      'SoundCraft, DeckCraft, WordCraft, CADCraft, EffectCraft, FilmCraft, FigCraft, TextureCraft, MaterialCraft, ' +
+      'PdfCraft) with their purpose, version, install status and how their `run` argv is built. Start here to pick ' +
+      'the right app for a task.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
@@ -268,14 +278,20 @@ async function callTool(name, args) {
         cleanupTempFiles(argv);
       }
       const parsed = parseJsonLines(r.stdout);
+      // batch-json apps wrap the step results in {completed, failed, results}.
+      const batch = app.style === 'batch-json' && parsed.length === 1
+        && parsed[0] && typeof parsed[0] === 'object' && Array.isArray(parsed[0].results)
+        ? parsed[0] : null;
+      const results = batch ? batch.results : parsed;
       return {
         app: key,
         run_style: app.style,
         argv: r.argv,
         exit_code: r.code,
         timed_out: !!r.timedOut,
-        results: parsed,
-        stdout: parsed.length === 1 ? undefined : r.stdout,
+        results,
+        ...(batch ? { batch: { completed: batch.completed, failed: batch.failed } } : {}),
+        stdout: results.length === 1 ? undefined : r.stdout,
         stderr: r.stderr || undefined,
       };
     }
@@ -335,7 +351,7 @@ async function handle(msg) {
     reply(id, {
       protocolVersion: PROTOCOL,
       capabilities: { tools: { listChanged: false } },
-      serverInfo: { name: 'artcraft-command-bridge', version: '1.0.0' },
+      serverInfo: { name: 'artcraft-command-bridge', version: '1.1.0' },
     });
     return;
   }
