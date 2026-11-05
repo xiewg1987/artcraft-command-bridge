@@ -253,7 +253,7 @@ node tools/cursor-launch-check.js # 按客户端的方式启动桥接器
 
 运行时零依赖；Node ≥ 18。
 
-设计记录：[token 优化方案](docs/token-optimization-plan.md)（Phase 1 + 2 已实施；Phase 3 未实施）。
+设计记录：[token 优化方案](docs/token-optimization-plan.md)（已实施）。
 
 ## 许可证
 

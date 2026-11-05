@@ -1,6 +1,6 @@
-# Token 优化方案 v2（Phase 1 + 2 已实施）
+# Token 优化方案 v2（已实施）
 
-> 状态：Phase 1 + 2 已实施（2026-11-05）；Phase 3 未实施
+> 状态：已实施（2026-11-05）
 > 日期：2026-11-02
 > 实施日期：2026-11-05
 > 范围：`artcraft-command-bridge` MCP server
@@ -8,7 +8,7 @@
 
 ## 1. 问题
 
-注册表缓存只解决 CLI 启动开销，**不解决返回内容的 token**。当前最容易烧上下文的是：
+注册表缓存只解决 CLI 启动开销，**不解决返回内容的 token**。改造前最容易烧上下文的是：
 
 - `artcraft_commands` 默认返回 60 条命令的完整 `params`
 - `artcraft_run` 多步执行时同时返回 `results` 和原始 `stdout`
@@ -51,11 +51,11 @@ O(本次实际用到的命令数 + 真实产物 + 一张受控预览图)
 - 精确查询保持现有调用次数，不额外增加 describe
 - 保留 5 个工具的定位
 
-非目标：
+非目标（明确不做）：
 
 - 常驻 CLI 进程（只省时间，不省 token）
-- 跨 app 搜索（P2）
-- 模糊/自然语言搜索（P2）
+- 跨 app 搜索
+- 模糊/自然语言搜索
 - 重写注册表缓存
 
 ## 3. `artcraft_commands`：list / describe 双模式
@@ -95,7 +95,7 @@ List 返回示例：
 }
 ```
 
-### 3.1 本地排序（P1）
+### 3.1 本地排序
 
 当前 `filter` 命中后按注册表顺序截断，最佳结果可能被挤出前 20。增加评分：
 
@@ -261,7 +261,7 @@ content: [{ type: 'text', text: JSON.stringify(result) }]
    - `limit` 5–10
    - 需要参数时用 `ids`，不要拉全量
 
-## 9. 预期收益（估算）
+## 9. 收益（估算）
 
 ### 单次调用
 
@@ -306,34 +306,22 @@ content: [{ type: 'text', text: JSON.stringify(result) }]
 | `detail:"auto"` 省略参数后模型不会用 `ids` | list 返回 `hint`；skill 明确流程；`detail:"full"` 保底 |
 | 默认 limit 60→20 | 显式传 `limit:60` 仍可用 |
 
-## 11. 实施顺序
+## 11. 实施内容
 
-### Phase 1（P0，4–6h）
+已全部落地：
 
-- `artcraft_commands`：`detail` / `ids` / limit 20
-- filter 排序
-- MCP content compact
-- skill/README
-
-### Phase 2（P0，6–8h）
-
-- `artcraft_run`：去 stdout 重复、截断、base64 保护
-- `artcraft_cli`：截断 + 全量写文件
-- `preview:"auto"` + image block
-- `preview_file` 文件读取与校验
-- skill 的“视觉交付必须看图”
-
-### Phase 3（P1，4–6h）
-
-- VectorCraft 超长参数摘要化
-- 预览降采样（用 app scale）
-- 跨 app 搜索（P2）
+- `artcraft_commands`：`detail`（auto/none/full）、`ids` describe 模式、默认 `limit:20`、本地评分排序。
+- MCP `content`：紧凑 JSON；`structuredContent` 保留。
+- `artcraft_run`：有 `results` 时默认不返回 `stdout`；`include_stdout` 可选；stdout/stderr 截断并写临时文件；base64 替换为 omitted 描述。
+- `artcraft_run` / `artcraft_cli`：`preview`（auto/none/image）、最多 1 张 MCP image block、图片校验与尺寸提示；`artcraft_cli` 支持 `preview_file` 和 `-o`/`--out`/`--export` 推断。
+- 新增 `tools/token-size-test.js`；`npm test` 同时跑聚合测试和 token 测试。
+- `skills/artcraft/SKILL.md` 与中英文 README 已同步新的使用纪律。
 
 ## 12. 验收指标
 
 - 视觉任务：恰好 1 张 image block
 - `text` / `structuredContent` 中没有 base64
-- 图片最长边 ≤1024px（或 app 原生小尺寸）
+- 图片经过扩展名、magic bytes 和 20 MB 上限校验；超过 4096px 返回 `preview_warning`，提示用 App 的 scale/size 导出更小图
 - 非视觉任务：不返回图片
 - PdfCraft list 20 条 < 2 KB
 - describe 单条 < 8 KB
@@ -341,40 +329,26 @@ content: [{ type: 'text', text: JSON.stringify(result) }]
 - 精确 filter 路径调用次数不增加
 - `agg-test` / `registry-cache-test` / `token-size-test` 全过
 
-## 13. 何时值得做
+## 13. 适用范围
 
-- **经常用**：做 Phase 1 + 2，约 1.5–2 天，拿到 70–90% 节省，且视觉任务能真正验收。
-- **偶尔用**：不改代码，按“窄查询 + 渲染写文件 + `read` 看图”的协议。
-- **只做一半**：命令发现痛 → Phase 1；render/base64 痛 → Phase 2。
-- **不建议现在做**：跨 app 搜索、模糊搜索、常驻进程。
+默认调用成本已从 `O(app 的命令表大小)` 降到 `O(实际命令数 + 产物元数据 + 最多一张预览图)`。适合经常用 ArtCraft、且希望把上下文留给内容和产物的场景；偶尔使用也按“窄查询 + 写文件 + `preview`”的路径工作。
 
-分发和发布是另一个问题：如果目标是让外部用户用起来，优先解决安装入口、demo 和目录投放，再回来做 token 优化。
+安装、分发和发布不在本方案的范围内。
 
-## 14. 临时使用协议（不改代码）
+## 14. 使用协议
 
-在方案落地前，按这个用：
+- `artcraft_commands` 发现命令时必须带 `filter`，`limit` 5–10。
+- 需要参数时用 `ids`，只查准备执行的那 1–8 条命令。
+- 多步合并成一次 `artcraft_run`。
+- 导出/渲染一律写文件，并用 `preview:"auto"` 或 `preview_file` 取预览。
+- 视觉验收看 image block 或输出文件；不要读 base64。
+- 非视觉任务用 `preview:"none"`，只查元数据。
+- 一个任务超过 3 次 ArtCraft 调用就停下来重新想。
 
-- `artcraft_commands` 必须带 `filter`
-- `limit` 5–10
-- 只查准备执行的那条命令
-- 多步合并成一次 `artcraft_run`
-- 导出/渲染一律 `--out` 写文件
-- 视觉验收时 `read` 输出文件；不要读 base64
-- 一个任务超过 3 次 ArtCraft 调用就停下来重新想
+## 15. 验证（2026-11-05）
 
-## 15. 实施记录（2026-11-05）
-
-Phase 1 + 2 已落地：
-
-- `artcraft_commands`：`detail`（auto/none/full）、`ids` describe 模式（最多 8 个）、默认 `limit:20`、本地评分排序。
-- MCP `content`：紧凑 JSON；`structuredContent` 保留。
-- `artcraft_run`：有 `results` 时默认不返回 `stdout`；`include_stdout` 可选；stdout/stderr 截断并写临时文件；base64 替换为 omitted 描述。
-- `artcraft_run` / `artcraft_cli`：`preview`（auto/none/image）、最多 1 张 MCP image block、图片校验与尺寸提示；`artcraft_cli` 支持 `preview_file` 和 `-o`/`--out`/`--export` 推断。
-- 新增 `tools/token-size-test.js`；`npm test` 现在同时跑聚合测试和 token 测试。
-- `skills/artcraft/SKILL.md` 与中英文 README 已同步新的使用纪律。
-
-未实施（Phase 3，P1/P2）：
-
-- VectorCraft 超长参数摘要化。
-- 预览降采样（当前只提示超过 4096px；不内置图像缩放）。
-- 跨 app 搜索、模糊搜索、常驻进程（仍按原计划不做）。
+- `npm test`：聚合测试 + `token-size-test` 通过。
+- `npm run test:registry`：cache miss → cache hit 通过。
+- PdfCraft list 20 条约 1.2 KB；精确 filter 路径不增加调用次数。
+- 预览：恰好 1 张 image block；`text` / `structuredContent` 无 base64。
+- 当前 15 个 App 共 7631 条命令；原生 MCP 871 tools / 640.8 KB；bridge 5 tools / 5.2 KB。
