@@ -2,7 +2,7 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-**One MCP server for the 15 [ArtCraft Crafting Apps](https://getartcraft.com/apps) — 5 tools instead of 866.**
+**One MCP server for the 15 [ArtCraft Crafting Apps](https://getartcraft.com/apps) — 5 tools instead of 871.**
 
 `artcraft-command-bridge` is an MCP server that drives the installed ArtCraft
 CLIs. It is a **bridge**, not an installer or updater: install and update the
@@ -10,13 +10,13 @@ apps with the ArtCraft Launcher (or their standalone installers), then let this
 server expose them to your agent through five tools.
 
 Each Crafting App ships its own MCP server that turns every engine command into
-a separate tool. With all 15 apps installed that is **866 tools / 630.6 KB of
-schema ≈ 161k tokens** of permanently resident context, re-sent on *every*
+a separate tool. With all 15 apps installed that is **871 tools / 640.8 KB of
+schema ≈ 164k tokens** of permanently resident context, re-sent on *every*
 request. This bridge keeps the same command registries behind a directory and a
 dispatcher:
 
 ```text
-866 tools · 630.6 KB · ~161,000 tokens   →   5 tools · 3.7 KB · ~950 tokens
+871 tools · 640.8 KB · ~164,000 tokens   →   5 tools · 5.2 KB · ~1,300 tokens
 ```
 
 Measured on 2026-11-05 with all 15 apps installed on Windows.
@@ -37,9 +37,9 @@ The Crafting Apps already share one model that is perfect for this:
 - `commands` — lists stable command IDs with their parameters
 - `run` / `batch` — executes those IDs
 
-Measured across the 15 apps, that is **7606 command IDs**. The 866 tools the
+Measured across the 15 apps, that is **7631 command IDs**. The 871 tools the
 apps' own MCP servers expose are only a subset view of the same registry. So
-the tools do not need to be flattened into 866 separate entries — they need a
+the tools do not need to be flattened into 871 separate entries — they need a
 **directory** and a **dispatcher**, which is what this is.
 
 Only PdfCraft ships an on-demand mode of its own (`pdfcraft-cli mcp --compact`,
@@ -106,10 +106,32 @@ machine.
 | Tool | What it does |
 |---|---|
 | `artcraft_apps` | The 15 apps: purpose, version, install status, and how their `run` argv is built. Start here. |
-| `artcraft_commands` | An app's stable command IDs with parameter docs, served from a local cache. Filter by substring. |
-| `artcraft_run` | Execute one or more command IDs in order. The deterministic path. |
-| `artcraft_cli` | Escape hatch — run any CLI subcommand verbatim (`export`, `render`, `convert`, `info`, `batch`). |
+| `artcraft_commands` | List command IDs or describe exact IDs. List mode is default; `ids` returns full params. Cached locally. |
+| `artcraft_run` | Execute commands in order. Compact results, truncated output, base64 redaction, optional preview. |
+| `artcraft_cli` | Escape hatch — run any CLI subcommand verbatim, with output truncation and image preview. |
 | `artcraft_help` | An app's own `--help` text. |
+
+## Token efficiency
+
+The default path is optimized for context:
+
+- `artcraft_commands` starts in **list mode** (default `limit:20`, only
+  `{id,label}`). A filter with at most 3 matches returns full `params`; broader
+  matches stay compact. Pass `ids:[...]` (max 8) to fetch full params only for
+  the commands you will actually run. There is no extra describe round-trip for
+  exact filters.
+- `artcraft_run` omits raw `stdout` when parsed `results` exist. Set
+  `include_stdout:true` to keep it. Output over `max_output_chars` (default
+  20k) is truncated and the full text is written to a temp file
+  (`stdout_file` / `stderr_file`).
+- Long base64/image strings are replaced with
+  `{ "omitted": true, "chars": 12345, "type": "image/png" }`; they never enter
+  `text` or `structuredContent`.
+- Visual outputs attach **at most one** MCP image block. The image is not
+  duplicated as base64 in text; use `preview:"none"` for non-visual tasks.
+  `artcraft_cli` infers `-o` / `--out` / `--export`, or accepts `preview_file`.
+- MCP text content is compact JSON. `structuredContent` carries the same data
+  without pretty-printing or image bytes.
 
 ## The 15 apps
 
@@ -157,8 +179,11 @@ Registry notes:
 ## Examples
 
 ```jsonc
-// what can figcraft do?
-{ "app": "figcraft", "filter": "node.create" }
+// list matching IDs only (broad query; keeps params out of context)
+{ "app": "figcraft", "filter": "node", "limit": 10 }
+
+// get full params for the commands you will run
+{ "app": "figcraft", "ids": ["node.create"] }
 
 // build a frame
 {
@@ -169,8 +194,12 @@ Registry notes:
   "output": "D:/out/hero.figcraft"
 }
 
-// export it (not a command ID — use the escape hatch)
-{ "app": "figcraft", "args": ["export", "hero.figcraft", "-o", "hero.png", "--format", "png", "--node", "Hero"] }
+// export it (not a command ID — use the escape hatch); preview attaches the PNG
+{
+  "app": "figcraft",
+  "args": ["export", "hero.figcraft", "-o", "hero.png", "--format", "png", "--node", "Hero"],
+  "preview": "auto"
+}
 
 // paint a texture set and save the native project (batch-json style)
 {
@@ -277,8 +306,9 @@ fails as a whole because one app is missing.
 ## Development
 
 ```sh
-npm test                          # 5-tool handshake + FigCraft smoke test
+npm test                          # handshake + FigCraft + token-size tests
 npm run test:registry             # cache miss then cache hit
+npm run test:token                # list/describe, truncation, base64, preview
 node tools/sync-registry.js       # pull command registries into the local cache
 node tools/probe-mcp.js           # probe every app's MCP handshake + tool count
 node tools/schema-size.js         # measure schema weight, refresh registry snapshots
@@ -289,7 +319,7 @@ node tools/cursor-launch-check.js # start the bridge the way a client would
 
 Zero runtime dependencies; Node ≥ 18.
 
-Design notes: [token optimization plan](docs/token-optimization-plan.md) (proposal, not implemented).
+Design notes: [token optimization plan](docs/token-optimization-plan.md) (Phase 1 + 2 implemented; Phase 3 deferred).
 
 ## License
 

@@ -2,14 +2,14 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-**一个 MCP 服务器管住 15 个 [ArtCraft Crafting Apps](https://getartcraft.com/apps) —— 5 个工具顶替 866 个。**
+**一个 MCP 服务器管住 15 个 [ArtCraft Crafting Apps](https://getartcraft.com/apps) —— 5 个工具顶替 871 个。**
 
 `artcraft-command-bridge` 是一个驱动本机 ArtCraft CLI 的 MCP 服务器。它是**桥接器**，不是安装器或更新器：用 ArtCraft Launcher（或各 App 的独立安装包）安装和更新 App，然后让这个服务器通过 5 个工具把它们交给你的 agent。
 
-每个 Crafting App 都自带 MCP 服务器，把每条引擎命令摊成独立工具。15 个全装 = **866 个工具 / 630.6 KB schema ≈ 16.1 万 token** 常驻上下文，而且每轮请求都要重发一遍。这个桥接器把同一份命令注册表收进一个**目录**和一个**分发器**：
+每个 Crafting App 都自带 MCP 服务器，把每条引擎命令摊成独立工具。15 个全装 = **871 个工具 / 640.8 KB schema ≈ 16.4 万 token** 常驻上下文，而且每轮请求都要重发一遍。这个桥接器把同一份命令注册表收进一个**目录**和一个**分发器**：
 
 ```text
-866 工具 · 630.6 KB · ~161,000 token   →   5 工具 · 3.7 KB · ~950 token
+871 工具 · 640.8 KB · ~164,000 token   →   5 工具 · 5.2 KB · ~1,300 token
 ```
 
 2026-11-05 在 Windows 上装齐 15 个 App 后实测。
@@ -25,7 +25,7 @@ Crafting Apps 本身已经有一套非常适合做这件事的模型：
 - `commands` —— 列出稳定命令 ID 及其参数
 - `run` / `batch` —— 按 ID 执行
 
-15 个 App 实测共 **7606 条命令 ID**。而原厂 MCP 暴露的 866 个工具，只是同一份注册表的一个子集视图。所以这些工具不需要被摊平成 866 条并列项 —— 它们需要的是一份**目录**和一个**分发器**，这就是这个桥接器。
+15 个 App 实测共 **7631 条命令 ID**。而原厂 MCP 暴露的 871 个工具，只是同一份注册表的一个子集视图。所以这些工具不需要被摊平成 871 条并列项 —— 它们需要的是一份**目录**和一个**分发器**，这就是这个桥接器。
 
 只有 PdfCraft 自带一个接近按需的模式（`pdfcraft-cli mcp --compact`，只暴露核心工具 + `tool_search`/`tool_call`）；另外 14 个没有等价的 `--compact` 模式，所以没有统一开关可开。
 
@@ -84,10 +84,20 @@ npm install -g artcraft-command-bridge
 | 工具 | 作用 |
 |---|---|
 | `artcraft_apps` | 15 个 App 的用途、版本、安装状态、run 参数风格。从这里开始。 |
-| `artcraft_commands` | 某 App 的稳定命令 ID + 参数说明，从本地缓存读取，支持子串过滤。 |
-| `artcraft_run` | 按 ID 顺序执行一条或多条命令。确定性干活的路子。 |
-| `artcraft_cli` | 逃生舱 —— 透传任意子命令（`export`/`render`/`convert`/`info`/`batch`）。 |
+| `artcraft_commands` | 列命令 ID 或 describe 精确 ID；默认列表模式，`ids` 返回完整参数，注册表本地缓存。 |
+| `artcraft_run` | 按 ID 顺序执行命令。结果精简、输出截断、base64 替换，可选预览图。 |
+| `artcraft_cli` | 逃生舱 —— 透传任意子命令，带输出截断和图片预览。 |
 | `artcraft_help` | 某 App 自己的 `--help` 全文。 |
+
+## Token 优化
+
+默认路径按上下文成本做了约束：
+
+- `artcraft_commands` 默认是**列表模式**（`limit:20`，只返回 `{id,label}`）。filter 命中 ≤3 条时直接给完整 `params`；更宽的查询保持精简。用 `ids:[...]`（最多 8 个）只为准备执行的命令取完整参数，精确查询不会多一次 describe 调用。
+- `artcraft_run` 有解析出的 `results` 时不再重复返回原始 `stdout`；需要时传 `include_stdout:true`。输出超过 `max_output_chars`（默认 20k）会截断，并把全文写入临时文件（`stdout_file` / `stderr_file`）。
+- 超长 base64/图片字符串会替换为 `{ "omitted": true, "chars": 12345, "type": "image/png" }`，不会进入 `text` 或 `structuredContent`。
+- 视觉结果最多附 **1 张** MCP image block；图片不会在文本里重复 base64。非视觉任务用 `preview:"none"`。`artcraft_cli` 会从 `-o` / `--out` / `--export` 推断，也可以显式传 `preview_file`。
+- MCP 的文本内容是紧凑 JSON；`structuredContent` 保留同一份数据，但不美化、不含图片字节。
 
 ## 15 个 App
 
@@ -134,8 +144,11 @@ positional-kv   run <tool> key=value              PdfCraft（tool 名，不是�
 ## 用法示例
 
 ```jsonc
-// figcraft 有哪些命令？
-{ "app": "figcraft", "filter": "node.create" }
+// 只列匹配的命令 ID（宽查询，不把参数塞进上下文）
+{ "app": "figcraft", "filter": "node", "limit": 10 }
+
+// 只为准备执行的命令取完整参数
+{ "app": "figcraft", "ids": ["node.create"] }
 
 // 建一个画板
 {
@@ -146,8 +159,12 @@ positional-kv   run <tool> key=value              PdfCraft（tool 名，不是�
   "output": "D:/out/hero.figcraft"
 }
 
-// 导出（不是命令 ID —— 走逃生舱）
-{ "app": "figcraft", "args": ["export", "hero.figcraft", "-o", "hero.png", "--format", "png", "--node", "Hero"] }
+// 导出（不是命令 ID —— 走逃生舱）；preview 会附上这张 PNG
+{
+  "app": "figcraft",
+  "args": ["export", "hero.figcraft", "-o", "hero.png", "--format", "png", "--node", "Hero"],
+  "preview": "auto"
+}
 
 // 画一层贴图并保存原生工程（batch-json 风格）
 {
@@ -223,8 +240,9 @@ node tools/sync-registry.js --clear    # 清空缓存
 ## 开发
 
 ```sh
-npm test                          # 5 工具握手 + FigCraft 冒烟测试
+npm test                          # 握手 + FigCraft + token 测试
 npm run test:registry             # 先 cache miss，再 cache hit
+npm run test:token                # list/describe、截断、base64、预览
 node tools/sync-registry.js       # 把命令注册表拉到本地缓存
 node tools/probe-mcp.js           # 探测每个 App 的 MCP 握手 + 工具数
 node tools/schema-size.js         # 量 schema 体量，刷新 registry 快照
@@ -235,7 +253,7 @@ node tools/cursor-launch-check.js # 按客户端的方式启动桥接器
 
 运行时零依赖；Node ≥ 18。
 
-设计记录：[token 优化方案](docs/token-optimization-plan.md)（提案，未实施）。
+设计记录：[token 优化方案](docs/token-optimization-plan.md)（Phase 1 + 2 已实施；Phase 3 未实施）。
 
 ## 许可证
 

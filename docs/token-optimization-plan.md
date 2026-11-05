@@ -1,8 +1,9 @@
-# Token 优化方案 v2（提案，未实施）
+# Token 优化方案 v2（Phase 1 + 2 已实施）
 
-> 状态：提案 / 未实施  
-> 日期：2026-11-02  
-> 范围：`artcraft-command-bridge` MCP server  
+> 状态：Phase 1 + 2 已实施（2026-11-05）；Phase 3 未实施
+> 日期：2026-11-02
+> 实施日期：2026-11-05
+> 范围：`artcraft-command-bridge` MCP server
 > 前置：注册表本地缓存已完成（commit `3e4848c`）；`artcraft` 路由 skill 已完成（commit `f3383d8`）
 
 ## 1. 问题
@@ -360,3 +361,20 @@ content: [{ type: 'text', text: JSON.stringify(result) }]
 - 导出/渲染一律 `--out` 写文件
 - 视觉验收时 `read` 输出文件；不要读 base64
 - 一个任务超过 3 次 ArtCraft 调用就停下来重新想
+
+## 15. 实施记录（2026-11-05）
+
+Phase 1 + 2 已落地：
+
+- `artcraft_commands`：`detail`（auto/none/full）、`ids` describe 模式（最多 8 个）、默认 `limit:20`、本地评分排序。
+- MCP `content`：紧凑 JSON；`structuredContent` 保留。
+- `artcraft_run`：有 `results` 时默认不返回 `stdout`；`include_stdout` 可选；stdout/stderr 截断并写临时文件；base64 替换为 omitted 描述。
+- `artcraft_run` / `artcraft_cli`：`preview`（auto/none/image）、最多 1 张 MCP image block、图片校验与尺寸提示；`artcraft_cli` 支持 `preview_file` 和 `-o`/`--out`/`--export` 推断。
+- 新增 `tools/token-size-test.js`；`npm test` 现在同时跑聚合测试和 token 测试。
+- `skills/artcraft/SKILL.md` 与中英文 README 已同步新的使用纪律。
+
+未实施（Phase 3，P1/P2）：
+
+- VectorCraft 超长参数摘要化。
+- 预览降采样（当前只提示超过 4096px；不内置图像缩放）。
+- 跨 app 搜索、模糊搜索、常驻进程（仍按原计划不做）。

@@ -1,7 +1,7 @@
 {
   "name": "artcraft-command-bridge",
-  "version": "1.1.0",
-  "description": "One MCP server for the 15 ArtCraft Crafting Apps — 5 tools instead of 866, so the tool schemas stop eating your context.",
+  "version": "1.2.0",
+  "description": "One MCP server for the 15 ArtCraft Crafting Apps — 5 tools instead of 871, with list/describe discovery, output truncation, base64 redaction and one-image previews.",
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -25,8 +25,9 @@
   },
   "scripts": {
     "sync-registry": "node tools/sync-registry.js",
-    "test": "node tools/agg-test.js",
-    "test:registry": "node tools/registry-cache-test.js"
+    "test": "node tools/agg-test.js && node tools/token-size-test.js",
+    "test:registry": "node tools/registry-cache-test.js",
+    "test:token": "node tools/token-size-test.js"
   },
   "files": [
     "server.js",

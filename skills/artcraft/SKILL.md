@@ -72,17 +72,31 @@ and CLI path.
 ## 3. Discover the commands
 
 ```jsonc
-{ "app": "figcraft", "filter": "node.create", "limit": 60 }
+// list mode: cheap, IDs only (default limit 20)
+{ "app": "figcraft", "filter": "node", "limit": 10 }
+
+// describe mode: full params only for the commands you will run
+{ "app": "figcraft", "ids": ["node.create"] }
 ```
 
-`artcraft_commands` returns `{ id, label, params, enabled, description }`.
+`artcraft_commands` has two modes:
 
+- **List** (default): returns `{id,label}` only. If `filter` matches ≤3 commands, it
+  automatically returns full `params`; broader results stay compact.
+- **Describe**: `ids:[...]` (max 8) returns full `params` for exactly those commands.
+
+Rules:
+
+- **Always pass `filter`** for discovery. Start broad ("new", "export", "text"), then
+  narrow. Use `limit` 5–10; do not pull the whole registry.
+- If the result is list mode, read `hint` and call again with `ids` for the 1–8 commands
+  you will actually run. Do not ask for `detail:"full"` just to browse.
+- `filter` matches id, label, and description; results are ranked (exact id first).
+  Multi-word queries require every word.
 - The registry is cached locally; repeat calls are a disk read, not a CLI spawn.
   Pass `refresh: true` after an app update.
 - `params` is documentation (for PdfCraft, a JSON Schema **string**), not a structured
   schema — read it before composing JSON.
-- `filter` matches id, label, and description. Start broad ("new", "export", "text"),
-  then narrow. If truncated, narrow the filter instead of raising the limit.
 - `enabled: false` means unavailable right now; read `disabled_reason`.
 - PdfCraft has no `commands` subcommand; the bridge maps its `tools` list into the same
   shape, so the same query works. Its tools are stateful: `doc_open` returns a `doc` id
@@ -106,8 +120,16 @@ and CLI path.
   a blank document).
 - `output` saves in the app's **native** format. For PNG/PDF/SVG/MP4 and other exports,
   use the app's export subcommand through `artcraft_cli`.
-- The result contains per-step JSON, `exit_code`, `stdout`, `stderr`. Treat a non-zero
-  `exit_code`, a timeout, or `ok: false` as failure.
+- The result contains per-step JSON and `exit_code`. Raw `stdout` is omitted by default
+  when `results` parsed; pass `include_stdout: true` only when debugging. `stderr` is
+  kept (truncated) for failures.
+- Output over `max_output_chars` (default 20k) is truncated; the full text is in
+  `stdout_file` / `stderr_file`. Base64/image strings over `max_string_chars` (default
+  4096) become `{ omitted: true, chars, type }` — never ask for them as text.
+- `preview` defaults to `auto`: if the output is an image, the result gets one image
+  block plus a small `preview` metadata object. Use `preview:"none"` for docx/xlsx/
+  audio/video, and `preview:"image"` when a visual artifact is required.
+- Treat a non-zero `exit_code`, a timeout, or `ok: false` as failure.
 
 **Known bridge limitation:** not every app's `run` style accepts `input`/`output`.
 LightCraft and EffectCraft accept neither; DesignCraft, GridCraft, DeckCraft, WordCraft,
@@ -130,15 +152,27 @@ separate `export` call through `artcraft_cli`.
 - `batch` — folder-level operations
 - app-specific subcommands that are not command IDs
 
+For image outputs, pass `preview:"auto"` and either an `-o`/`--out`/`--export` path or
+`preview_file`. The bridge validates the file (PNG/JPEG/GIF/WebP, magic bytes, ≤20 MB)
+and attaches one image block. `preview_warning` means the file was missing/invalid or
+larger than 4096 px; export a smaller preview before looking.
+
 When unsure of flags: `artcraft_help({ app, args: ["run", "--help"] })` (some apps use
 `["help", "run"]`). Check before guessing.
 
 ## 6. Verify before reporting
 
-- `info` the output (pages, size, duration, layer count) and compare with the request.
-- Render a PNG preview and actually look at it when the result is visual.
-- Documents: confirm page count and that text is not empty.
-- Media: confirm duration, dimensions, and codec.
+- **Visual work: look before you report done.** Render/export a PNG, inspect the image
+  block, and check layout, color, cropping, truncation, and whitespace. If no image
+  block came back, read the output file directly. Never claim a visual result is good
+  from `exit_code: 0` alone.
+- **One modification, one look.** Do not re-read the same unchanged image on every
+  turn; re-render only after a change.
+- **Non-visual work: no images.** For docx/xlsx/audio/video, use `preview:"none"` and
+  verify metadata instead (pages, size, duration, codec, layer count).
+- `info` the output and compare it with the request.
+- If `preview_warning` reports >4096 px, use the app's `scale`/size flag to export a
+  smaller preview; don't attach a huge image.
 - Report the absolute output path.
 
 ## 7. Failure map
@@ -150,6 +184,9 @@ When unsure of flags: `artcraft_help({ app, args: ["run", "--help"] })` (some ap
 | Param shape error | Read that command's `params` string; keys must match exactly. |
 | Export/format error | `artcraft_help` for the export subcommand; flags differ per app. |
 | Timeout | Split into smaller steps or raise `timeout_ms`; video/render jobs need more. |
+| `stdout_truncated` | Read `stdout_file` if the full log is needed; otherwise the parsed `results` are enough. |
+| `preview_warning` / no image block | Check the output path or pass `preview_file`; export an image with `artcraft_cli`; keep it ≤4096 px. |
+| `omitted: true` in a result | That was base64/image bytes. Do not request it as text; write an image file and use preview/read. |
 | Empty/blank output | Check that the document had a page/frame/element, and that save used the native format. |
 
 ## On-demand escalation (important)

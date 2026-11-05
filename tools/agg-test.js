@@ -52,7 +52,7 @@ function show(label, m) {
   const tools = list.result.tools;
   console.log(`\ntools/list -> ${tools.length} tools: ${tools.map(t => t.name).join(', ')}`);
   const bytes = Buffer.byteLength(JSON.stringify(tools), 'utf8');
-  console.log(`schema size -> ${(bytes / 1024).toFixed(1)} KB  (ArtCraft 原生 866 个 = 630.6 KB)`);
+  console.log(`schema size -> ${(bytes / 1024).toFixed(1)} KB  (ArtCraft 原生 871 个 = 640.8 KB)`);
 
   // notification: no reply expected — send raw, do not await
   p.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
