@@ -1,20 +1,25 @@
 # artcraft-command-bridge
 
+[English](README.md) · [简体中文](README.zh-CN.md)
+
 **One MCP server for the 15 [ArtCraft Crafting Apps](https://getartcraft.com/apps) — 5 tools instead of 866.**
 
-Each Crafting App ships its own MCP server that exposes every engine command as a
-separate tool. Registering all 15 of them costs **866 tools / 630.6 KB of schema ≈
-161k tokens of permanently resident context**, and that payload is re-sent on
-*every* request.
+`artcraft-command-bridge` is an MCP server that drives the installed ArtCraft
+CLIs. It is a **bridge**, not an installer or updater: install and update the
+apps with the ArtCraft Launcher (or their standalone installers), then let this
+server expose them to your agent through five tools.
 
-This bridge drives the apps' CLIs instead and exposes **5 tools / 3.7 KB**.
+Each Crafting App ships its own MCP server that turns every engine command into
+a separate tool. With all 15 apps installed that is **866 tools / 630.6 KB of
+schema ≈ 161k tokens** of permanently resident context, re-sent on *every*
+request. This bridge keeps the same command registries behind a directory and a
+dispatcher:
 
-```
+```text
 866 tools · 630.6 KB · ~161,000 tokens   →   5 tools · 3.7 KB · ~950 tokens
 ```
 
-Scope: the 15 command-driven Crafting Apps. Craft Anything is an agent
-front-end with its own tool protocol, so the bridge does not wrap it.
+Measured on 2026-11-05 with all 15 apps installed on Windows.
 
 ---
 
@@ -22,15 +27,15 @@ front-end with its own tool protocol, so the bridge does not wrap it.
 
 MCP clients register a server's tool list in full. The protocol has no
 "just give me the names, fetch the schema on demand" mode — the client calls
-`tools/list` once and keeps every tool's `name` + `description` +
-`inputSchema` in the system payload forever. Some clients have an on-demand
-tool *search* facility, but that covers deferred tools (cron, integrations),
-not MCP server tools.
+`tools/list` once and keeps every tool's `name` + `description` + `inputSchema`
+in the system payload forever. Some clients have an on-demand tool *search*
+facility, but that covers deferred tools (cron, integrations), not MCP server
+tools.
 
 The Crafting Apps already share one model that is perfect for this:
 
 - `commands` — lists stable command IDs with their parameters
-- `run` — executes those IDs
+- `run` / `batch` — executes those IDs
 
 Measured across the 15 apps, that is **7606 command IDs**. The 866 tools the
 apps' own MCP servers expose are only a subset view of the same registry. So
@@ -38,35 +43,63 @@ the tools do not need to be flattened into 866 separate entries — they need a
 **directory** and a **dispatcher**, which is what this is.
 
 Only PdfCraft ships an on-demand mode of its own (`pdfcraft-cli mcp --compact`,
-which exposes a core set plus `tool_search`/`tool_call`); the other fourteen have no
-equivalent `--compact` mode, so there was no unified switch to simply turn on.
+which exposes a core set plus `tool_search`/`tool_call`); the other fourteen have
+no equivalent `--compact` mode, so there was no unified switch to simply turn on.
 
 ## Quick start
 
-1. Install the apps you want — see [getartcraft.com/apps](https://getartcraft.com/apps).
-   Each app installs a `<app>-cli` binary.
+### 1. Install the apps
 
-2. Register this server with your MCP client:
+Install the apps you need — see [getartcraft.com/apps](https://getartcraft.com/apps).
+The recommended path is the ArtCraft Launcher, which installs every app and keeps
+them updated. Each app installs a `<app>-cli` binary.
 
-   ```jsonc
-   {
-     "mcpServers": {
-       "artcraft-command-bridge": {
-         "type": "stdio",
-         "command": "node",
-         "args": ["/absolute/path/to/artcraft-command-bridge/server.js"]
-       }
-     }
-   }
-   ```
+The bridge does not install or update them. Updating an app only invalidates its
+registry cache; it does not change the bridge code.
 
-   Or with the official installer:
+### 2. Register the server
 
-   ```sh
-   npm install -g artcraft-command-bridge
-   ```
+OpenCode (`~/.config/opencode/opencode.json`):
 
-3. Restart the client so the tools load.
+```jsonc
+{
+  "mcp": {
+    "servers": {
+      "artcraft-command-bridge": {
+        "type": "local",
+        "command": ["node", "D:/path/to/artcraft-command-bridge/server.js"],
+        "enabled": true
+      }
+    }
+  }
+}
+```
+
+Other MCP clients (`mcpServers`):
+
+```jsonc
+{
+  "mcpServers": {
+    "artcraft-command-bridge": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/absolute/path/to/artcraft-command-bridge/server.js"]
+    }
+  }
+}
+```
+
+Or install the package globally:
+
+```sh
+npm install -g artcraft-command-bridge
+```
+
+### 3. Restart and verify
+
+Restart the client so the tools load. Then call `artcraft_apps`: it lists all
+15 app entries and `installed_count` reports how many are present on this
+machine.
 
 ## The 5 tools
 
@@ -78,7 +111,50 @@ equivalent `--compact` mode, so there was no unified switch to simply turn on.
 | `artcraft_cli` | Escape hatch — run any CLI subcommand verbatim (`export`, `render`, `convert`, `info`, `batch`). |
 | `artcraft_help` | An app's own `--help` text. |
 
-### Example
+## The 15 apps
+
+| App | Pick it for | `run` style | Registry |
+|---|---|---|---|
+| **PhotoCraft** (`photocraft`) | Pixel editing, layers, masks, PSD | `cmd-params` | `commands --json` |
+| **LightCraft** (`lightcraft`) | RAW development, culling, variants | `positional` | `commands --json` |
+| **VectorCraft** (`vectorcraft`) | Logos, icons, paths, print vector | `cmd-params` | `commands --json` |
+| **DesignCraft** (`designcraft`) | Multi-page print, master pages, PDF/X | `cmd-inline-eq` | `commands` (JSON) |
+| **GridCraft** (`gridcraft`) | Spreadsheets, formulas, charts | `cmd-inline-eq` | `commands --json` |
+| **SoundCraft** (`soundcraft`) | Audio editing, podcast, mix/master | `cmd-inline-eq` | `commands` (text table) |
+| **DeckCraft** (`deckcraft`) | Slide decks, pptx | `cmd-inline-eq` | `commands` (text table) |
+| **WordCraft** (`wordcraft`) | Long-form documents, docx | `cmd-inline-eq` | `commands --json` |
+| **CADCraft** (`cadcraft`) | CAD drawings, dimensions, DXF/DWG | `cmd-inline-sp` | `commands` (JSON) |
+| **EffectCraft** (`effectcraft`) | Motion graphics, keyframes, comps | `positional` | `commands --json` |
+| **FilmCraft** (`filmcraft`) | Video timeline, cuts, captions, MP4 | `script-jsonl` | `commands --json` |
+| **FigCraft** (`figcraft`) | UI screens, components, prototypes | `script-json` | `commands --json` |
+| **TextureCraft** (`texturecraft`) | 3D texture sets, painting, baking | `batch-json` | `commands` (text table) |
+| **MaterialCraft** (`materialcraft`) | Procedural PBR materials, node graphs | `batch-json` | `commands` (JSON) |
+| **PdfCraft** (`pdfcraft`) | PDF merge/split, forms, OCR, redact | `positional-kv` | `tools` |
+
+Style reference:
+
+```text
+cmd-params      --cmd <id> --params <json>        PhotoCraft, VectorCraft
+cmd-inline-eq   --cmd <id>={<json>}               DesignCraft, GridCraft, SoundCraft,
+                                                   DeckCraft, WordCraft
+cmd-inline-sp   --cmd '<id> <json>'                CADCraft
+positional      <id> <json>                       LightCraft, EffectCraft
+script-json     run <script.json>                 FigCraft ({command, params})
+script-jsonl    run <script.jsonl>                FilmCraft ({id, params})
+batch-json      batch <script.json>               TextureCraft, MaterialCraft
+                                                   ({open, steps, save})
+positional-kv   run <tool> key=value              PdfCraft (tool names, not IDs)
+```
+
+Registry notes:
+
+- `commands --json` is the preferred shape.
+- CADCraft/DesignCraft treat `--json` as a filter and return `[]`; MaterialCraft
+  rejects it as an unknown option. The bridge falls back to plain `commands`.
+- DeckCraft/SoundCraft/TextureCraft print plain-text tables.
+- PdfCraft has no `commands`; the bridge normalizes its `tools` list.
+
+## Examples
 
 ```jsonc
 // what can figcraft do?
@@ -104,50 +180,18 @@ equivalent `--compact` mode, so there was no unified switch to simply turn on.
   ],
   "output": "D:/out/armor.tcraft"
 }
+
+// build a procedural material package (batch-json style)
+{
+  "app": "materialcraft",
+  "steps": [
+    { "id": "graph.seed", "params": { "seed": 7 } }
+  ],
+  "output": "D:/out/brick.sbs"
+}
 ```
 
-## How it works
-
-Every app's `run` takes its commands in a slightly different shape. The bridge
-translates one uniform `{ id, params }` model into each app's own syntax:
-
-| argv style | apps |
-|---|---|
-| `--cmd <id> --params <json>` | PhotoCraft, VectorCraft |
-| `--cmd <id>={<json>}` | DesignCraft, GridCraft, SoundCraft, DeckCraft, WordCraft |
-| `--cmd '<id> <json>'` | CADCraft |
-| positional `<id> <json>` | LightCraft, EffectCraft |
-| script file `run <script.json>` | FigCraft (`{command, params}`) |
-| script file `run <script.jsonl>` | FilmCraft (`{id, params}`) |
-| batch file `batch <script.json>` | TextureCraft, MaterialCraft (`{open, steps, save}`) |
-| `run <tool> key=value` | PdfCraft (tool names, not command IDs) |
-
-The command registry is exposed differently too, so the bridge normalises it:
-
-| registry shape | apps |
-|---|---|
-| `commands --json` | PhotoCraft, VectorCraft, FigCraft, GridCraft, LightCraft, EffectCraft, FilmCraft, WordCraft |
-| `commands` (plain JSON) | CADCraft, DesignCraft (their `--json` is parsed as a filter and returns `[]`); MaterialCraft rejects `--json` as an unknown option |
-| plain-text table | DeckCraft, SoundCraft, TextureCraft |
-| `tools` subcommand | PdfCraft has no `commands` at all |
-
-## Finding the CLIs
-
-`artcraft_apps` reports what it found. The bridge probes, in order:
-
-1. `ARTCRAFT_<APP>_CLI` — e.g. `ARTCRAFT_PHOTOCRAFT_CLI=/opt/craft/photocraft-cli`
-2. `ARTCRAFT_HOME` and the official per-OS app roots
-   (`%LOCALAPPDATA%\storytold\apps`, `~/.local/share/storytold/apps`,
-   `~/Library/Application Support/storytold/apps`)
-3. `PATH` (`<app>-cli`)
-4. System install locations
-   (`C:\Program Files\<App>Craft\`, `/Applications/<App>Craft.app/Contents/MacOS/`,
-   `/usr/local/bin`)
-
-Apps that are not installed are reported as such and skipped — the bridge never
-fails as a whole because one app is missing.
-
-## Registry cache
+## Registry cache and updates
 
 `artcraft_commands` does not spawn the CLI on every call. The first read of an
 app pulls its registry once and writes it to a per-machine cache; later reads
@@ -172,13 +216,55 @@ A cache hit removes the CLI process from discovery, but it does not shrink the
 response: the token cost is the returned command list, not where it was read
 from. Use `filter` and `limit` to keep that list small.
 
+### After installing or updating an app
+
+The registry cache handles CLI changes automatically. The app **catalog** is
+loaded when the bridge starts, so restart the MCP client after adding or
+removing an app. Then call `artcraft_apps`: it lists all 15 entries and
+`installed_count` reports how many are present. If an old list persists, check
+which `server.js` the client launches — the process command line should point
+at this checkout, not an old copy.
+
+## Finding the CLIs
+
+`artcraft_apps` reports what it found. The bridge probes, in order:
+
+1. `ARTCRAFT_<APP>_CLI` — e.g. `ARTCRAFT_PHOTOCRAFT_CLI=/opt/craft/photocraft-cli`
+2. `ARTCRAFT_HOME` and the official per-OS app roots
+   (`%LOCALAPPDATA%\storytold\apps`, `~/.local/share/storytold/apps`,
+   `~/Library/Application Support/storytold/apps`)
+3. `PATH` (`<app>-cli`)
+4. System install locations
+   (`C:\Program Files\<App>Craft\`, `/Applications/<App>Craft.app/Contents/MacOS/`,
+   `/usr/local/bin`)
+
+Apps that are not installed are reported as such and skipped — the bridge never
+fails as a whole because one app is missing.
+
+## Scope and limitations
+
+- **15 command-driven Crafting Apps.** Craft Anything is an agent front-end with
+  its own tool protocol, not a `commands` + `run`/`batch` engine, so the bridge
+  does not wrap it.
+- **The bridge does not install, update, or launch GUI apps.** Use the ArtCraft
+  Launcher or the apps' installers for that.
+- **`input`/`output` support varies:**
+  - both: PhotoCraft, VectorCraft, SoundCraft, FilmCraft, FigCraft, TextureCraft,
+    MaterialCraft
+  - input only: DesignCraft, GridCraft, DeckCraft, WordCraft, CADCraft
+  - output only: PdfCraft
+  - neither: LightCraft, EffectCraft
+- **TextureCraft / MaterialCraft** use a batch JSON script. `output` saves the
+  native project (`.tcraft` / `.sbs`); export PNG/EXR maps with
+  `artcraft_cli export`.
+
 ## Why not an existing tool?
 
 - **[eznix86/mcp-gateway](https://github.com/eznix86/mcp-gateway)** (MIT) — a
   general-purpose gateway with the same idea, but it aggregates *MCP servers*,
   so the 15 Crafting App servers still have to be running as upstream
-  processes, and its `search` is text-similarity rather than an exact
-  registry lookup.
+  processes, and its `search` is text-similarity rather than an exact registry
+  lookup.
 - **[ai-2070/claude-storytold-skills](https://github.com/ai-2070/claude-storytold-skills)**
   (MIT) — a Claude Code plugin whose per-app skills use grep over generated
   reference catalogs. Same goal, different layer: it still registers every
@@ -191,11 +277,12 @@ from. Use `filter` and `limit` to keep that list small.
 ## Development
 
 ```sh
+npm test                          # 5-tool handshake + FigCraft smoke test
+npm run test:registry             # cache miss then cache hit
 node tools/sync-registry.js       # pull command registries into the local cache
 node tools/probe-mcp.js           # probe every app's MCP handshake + tool count
 node tools/schema-size.js         # measure schema weight, refresh registry snapshots
 node tools/agg-test.js            # end-to-end self-test of the bridge
-node tools/registry-cache-test.js # verify a cache hit does not re-read the CLI
 node tools/per-app-verify.js      # verify each app's run argv is accepted
 node tools/cursor-launch-check.js # start the bridge the way a client would
 ```
