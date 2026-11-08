@@ -51,23 +51,27 @@ async function call(rpc, args) {
   p.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
 
   let t0 = Date.now();
-  const first = await call(rpc, { app: APP, filter: 'node.create', limit: 5, refresh: true });
+  const first = await call(rpc, {
+    app: APP, filter: 'node.create', limit: 5, refresh: true, cache_info: true,
+  });
   const firstMs = Date.now() - t0;
 
   t0 = Date.now();
-  const second = await call(rpc, { app: APP, filter: 'node.create', limit: 5 });
+  const second = await call(rpc, {
+    app: APP, filter: 'node.create', limit: 5, cache_info: true,
+  });
   const secondMs = Date.now() - t0;
 
   p.kill();
 
-  console.log(`${APP} refresh:true -> cache.hit=${first.cache.hit} total=${first.total} ${firstMs}ms`);
-  console.log(`${APP} cache hit  -> cache.hit=${second.cache.hit} total=${second.total} ${secondMs}ms`);
+  console.log(`${APP} refresh:true -> cache.hit=${first.cache.hit} matched=${first.matched} ${firstMs}ms`);
+  console.log(`${APP} cache hit  -> cache.hit=${second.cache.hit} matched=${second.matched} ${secondMs}ms`);
   console.log(`cache file: ${second.cache.file}`);
 
   const ok = first.cache.hit === false
     && second.cache.hit === true
-    && first.total > 0
-    && second.total === first.total;
+    && first.matched > 0
+    && second.matched === first.matched;
 
   if (!ok) {
     console.error('FAIL: expected refresh miss then cache hit');

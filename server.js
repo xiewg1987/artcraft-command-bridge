@@ -18,14 +18,16 @@
 'use strict';
 
 const fs = require('fs');
-const os = require('os');
 
-const { APPS, APP_BY_ID } = require('./lib/apps');
+const { APPS, APP_BY_ID, cleanupGeneratedFiles } = require('./lib/apps');
+const { version: SERVER_VERSION } = require('./package.json');
 const { resolveCli, explain } = require('./lib/resolve');
-const { execFile } = require('./lib/exec');
+const { execFile, DEFAULT_CAPTURE_CHARS } = require('./lib/exec');
 const { getRegistry } = require('./lib/registry');
 const {
   MAX_IDS,
+  DEFAULT_MAX_PARAM_CHARS,
+  MAX_PARAM_CHARS,
   limitValue,
   filterCommands,
   projectCommand,
@@ -37,6 +39,7 @@ const {
   redactBase64Text,
   sanitizeValue,
   truncateStream,
+  tempStreamFile,
 } = require('./lib/output');
 const {
   previewFromRun,
@@ -58,7 +61,7 @@ function withImages(result, images) {
 }
 
 function previewMode(value) {
-  const mode = value ?? 'auto';
+  const mode = value ?? 'none';
   if (!['auto', 'none', 'image'].includes(mode)) {
     throw new Error('preview must be "auto", "none", or "image"');
   }
@@ -69,10 +72,15 @@ function previewMaxImages(value) {
   return clampInt(value, 1, 0, 1);
 }
 
-/** Build truncated stdout/stderr fields, with base64 redacted. */
-function streamFields(text, { app, kind, maxChars, maxStringChars, include = true }) {
+/** Build bounded stdout/stderr fields, with base64 redacted. */
+function streamFields(text, {
+  app, kind, maxChars, maxStringChars, include = true,
+  streamTruncated = false, streamFile = null, streamChars = null, writeError = null,
+}) {
   const redacted = redactBase64Text(text || '', { maxStringChars });
-  const t = truncateStream(redacted, { app, kind, maxChars });
+  const t = streamTruncated
+    ? { text: redacted.slice(0, maxChars), truncated: true, file: streamFile, chars: streamChars }
+    : truncateStream(redacted, { app, kind, maxChars });
   const fields = {};
   if (t.truncated) {
     fields[`${kind}_truncated`] = true;
@@ -80,7 +88,88 @@ function streamFields(text, { app, kind, maxChars, maxStringChars, include = tru
     fields[`${kind}_chars`] = t.chars;
   }
   if (include && t.text) fields[kind] = t.text;
+  if (writeError) fields[`${kind}_write_error`] = writeError;
   return fields;
+}
+
+function captureBudget(maxOutputChars) {
+  return Math.max(DEFAULT_CAPTURE_CHARS, Math.min(1024 * 1024, maxOutputChars * 4));
+}
+
+/** Drop repeated command/id/status wrappers from CLI step results. */
+function compactStepResults(items) {
+  const results = [];
+  const errors = [];
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+      const failed = item.ok === false || item.status === 'error' || item.error !== undefined;
+      if (failed) {
+        errors.push({
+          step: index,
+          ...(item.command || item.id || item.tool ? { id: item.command || item.id || item.tool } : {}),
+          error: item.error ?? item.message ?? 'command failed',
+        });
+        results.push(null);
+        continue;
+      }
+      if (Object.prototype.hasOwnProperty.call(item, 'result')) {
+        results.push(item.result);
+        continue;
+      }
+    }
+    results.push(item);
+  }
+  return { results, ...(errors.length ? { errors } : {}) };
+}
+
+function compactRunResults(value) {
+  if (Array.isArray(value)) {
+    if (value.length === 1 && value[0] && typeof value[0] === 'object'
+      && value[0].ok !== false && Array.isArray(value[0].steps)) {
+      return compactStepResults(value[0].steps);
+    }
+    return compactStepResults(value);
+  }
+  if (value && typeof value === 'object' && value.ok !== false && Array.isArray(value.steps)) {
+    return compactStepResults(value.steps);
+  }
+  return { results: value == null ? [] : [value] };
+}
+
+function boundArray(items, maxChars, app, kind = 'results') {
+  const json = JSON.stringify(items || []);
+  if (json.length <= maxChars) return { value: items };
+
+  const file = tempStreamFile(app, kind);
+  fs.writeFileSync(file, json, 'utf8');
+  const kept = [];
+  let size = 2;
+  for (const item of items || []) {
+    const part = JSON.stringify(item);
+    if (size + part.length + (kept.length ? 1 : 0) > maxChars) break;
+    kept.push(item);
+    size += part.length + (kept.length > 1 ? 1 : 0);
+  }
+  return {
+    value: kept,
+    truncated: true,
+    file,
+    chars: json.length,
+    omitted: Math.max(0, (items || []).length - kept.length),
+  };
+}
+
+function boundValue(value, maxChars, app, kind = 'result') {
+  const json = JSON.stringify(value);
+  if (json.length <= maxChars) return { value };
+  const file = tempStreamFile(app, kind);
+  fs.writeFileSync(file, json, 'utf8');
+  return {
+    value: { omitted: true, chars: json.length, file },
+    truncated: true,
+    chars: json.length,
+  };
 }
 
 function cliFor(app) {
@@ -125,6 +214,10 @@ function parseJsonLines(text) {
     if (t.startsWith('{') || t.startsWith('[')) {
       try { out.push(JSON.parse(t)); continue; } catch (e) { /* not json */ }
     }
+    const labelled = t.match(/^[^:\s]+:\s*([\[{][\s\S]*)$/);
+    if (labelled) {
+      try { out.push(JSON.parse(labelled[1])); continue; } catch (e) { /* not json */ }
+    }
     out.push(t);
   }
   return out;
@@ -146,34 +239,25 @@ function requireApp(id) {
   return { key, app, cli };
 }
 
-/** Remove the throwaway script files that script-style apps need (FigCraft/FilmCraft/TextureCraft/MaterialCraft). */
-function cleanupTempFiles(argv) {
-  const tmp = os.tmpdir();
-  for (const a of argv) {
-    if (typeof a !== 'string' || !a.startsWith(tmp)) continue;
-    if (!/\.(json|jsonl)$/i.test(a)) continue;
-    try { fs.unlinkSync(a); } catch (e) { /* already gone */ }
-  }
-}
-
 /* ------------------------------------------------------------------ tools */
 
 const TOOLS = [
   {
     name: 'artcraft_apps',
     description:
-      'List the ArtCraft applications available locally (PhotoCraft, LightCraft, VectorCraft, DesignCraft, GridCraft, ' +
-      'SoundCraft, DeckCraft, WordCraft, CADCraft, EffectCraft, FilmCraft, FigCraft, TextureCraft, MaterialCraft, ' +
-      'PdfCraft) with their purpose, version, install status and how their `run` argv is built. Start here to pick ' +
-      'the right app for a task.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      'List installed ArtCraft apps. Returns a compact installed/missing list by default; use detail:"full" only for paths and purposes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        detail: { type: 'string', enum: ['brief', 'full'], description: 'Default brief.' },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: 'artcraft_commands',
     description:
-      "Discover an app's stable command IDs from its own registry. List mode returns only {id,label}; a narrow " +
-      'filter (<=3 matches) or ids:[...] returns full params. Use ids for the commands you will actually run. ' +
-      'The registry is cached locally; pass refresh:true after an app update.',
+      "Find an app's command IDs. Keep filter narrow. List mode returns only IDs; ids:[...] returns parameters for the selected commands.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -183,14 +267,16 @@ const TOOLS = [
           type: 'array',
           items: { type: 'string' },
           maxItems: MAX_IDS,
-          description: `Describe these exact command IDs with full params (max ${MAX_IDS}).`,
+          description: `Describe exact IDs (max ${MAX_IDS}).`,
         },
-        limit: { type: 'number', description: 'Max commands in list/full mode (default 20, max 200).' },
+        limit: { type: 'number', description: 'List/full result cap (default 10, max 100).' },
         detail: {
           type: 'string',
           enum: ['auto', 'none', 'full'],
-          description: 'auto: full params only for narrow (<=3) matches; none: list only; full: always include params.',
+          description: 'auto: params for <=3 matches; none: IDs only; full: params for all returned matches.',
         },
+        max_param_chars: { type: 'number', description: 'Cap each params string (default 2400, max 12000).' },
+        cache_info: { type: 'boolean', description: 'Include cache diagnostics.' },
         refresh: { type: 'boolean', description: 'Re-read the registry from the CLI and rewrite the local cache (default false).' },
       },
       required: ['app'],
@@ -200,10 +286,7 @@ const TOOLS = [
   {
     name: 'artcraft_run',
     description:
-      "Execute one or more stable command IDs of an ArtCraft app in order (the app's own headless engine). Steps are " +
-      '{id, params} pairs; params is a JSON object matching that command\'s documented parameters. Returns each step\'s ' +
-      'result plus the exit code. stdout is omitted when results exist unless include_stdout:true; large output is ' +
-      'truncated to a temp file; base64 is redacted; visual output can attach one image block.',
+      'Execute {id,params} steps in one headless session. Returns compact results; raw output and image previews are opt-in.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -227,12 +310,13 @@ const TOOLS = [
         preview: {
           type: 'string',
           enum: ['auto', 'none', 'image'],
-          description: 'auto: attach an image when output/result is an image; none: never; image: require one (default auto).',
+          description: 'none (default): no image; auto: attach a <=1024px image if found; image: require one.',
         },
         preview_max_images: { type: 'number', description: 'Max preview images (default 1, max 1).' },
         include_stdout: { type: 'boolean', description: 'Include raw stdout even when results parsed (default false).' },
-        max_output_chars: { type: 'number', description: 'Truncate stdout/stderr after this many chars (default 20000).' },
-        max_string_chars: { type: 'number', description: 'Redact base64/image strings longer than this (default 4096).' },
+        max_output_chars: { type: 'number', description: 'Raw stdout/stderr cap (default 6000, max 50000).' },
+        max_string_chars: { type: 'number', description: 'Redact base64/image strings longer than this (default 2048).' },
+        max_result_chars: { type: 'number', description: 'Structured result cap (default 8000).' },
         timeout_ms: { type: 'number', description: 'Timeout in ms (default 120000).' },
       },
       required: ['app', 'steps'],
@@ -242,10 +326,7 @@ const TOOLS = [
   {
     name: 'artcraft_cli',
     description:
-      'Escape hatch: run any ArtCraft CLI subcommand verbatim (convert / export / render / info / batch / version ...). ' +
-      'Use when a capability is not a stable command ID — file conversion, rendering to PNG/SVG/PDF, document info. ' +
-      'Args are passed to the CLI exactly as given, no shell interpretation. stdout is truncated; pass preview:auto ' +
-      'or preview:image (and optional preview_file) to attach one image block.',
+      'Run a CLI subcommand verbatim. Parses JSON output compactly; raw output and image previews are opt-in.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -254,10 +335,13 @@ const TOOLS = [
         preview: {
           type: 'string',
           enum: ['auto', 'none', 'image'],
-          description: 'auto: infer -o/--out and attach an image if it exists; none: never; image: require one (default auto).',
+          description: 'none (default); auto: infer output image; image: require a preview.',
         },
         preview_file: { type: 'string', description: 'Optional image file to attach; inferred from -o/--out/--export when omitted.' },
-        max_output_chars: { type: 'number', description: 'Truncate stdout/stderr after this many chars (default 20000).' },
+        include_stdout: { type: 'boolean', description: 'Include raw stdout even when JSON was parsed.' },
+        max_output_chars: { type: 'number', description: 'Raw stdout/stderr cap (default 6000).' },
+        max_string_chars: { type: 'number', description: 'Redact long base64/image strings (default 2048).' },
+        max_result_chars: { type: 'number', description: 'Parsed JSON result cap (default 8000).' },
         timeout_ms: { type: 'number', description: 'Timeout in ms (default 120000).' },
       },
       required: ['app', 'args'],
@@ -267,13 +351,13 @@ const TOOLS = [
   {
     name: 'artcraft_help',
     description:
-      "Return an app's own CLI usage text (its --help output). Use to learn the exact subcommand flags of an app when " +
-      'artcraft_commands does not cover the operation (e.g. export flags, batch options).',
+      "Return an app's help text, capped by default. Use when command parameters do not cover export/import flags.",
     inputSchema: {
       type: 'object',
       properties: {
         app: { type: 'string', description: 'App id.' },
         args: { type: 'array', items: { type: 'string' }, description: 'Optional extra args, e.g. ["run"].' },
+        max_output_chars: { type: 'number', description: 'Help text cap (default 6000).' },
       },
       required: ['app'],
       additionalProperties: false,
@@ -284,23 +368,30 @@ const TOOLS = [
 async function callTool(name, args) {
   switch (name) {
     case 'artcraft_apps': {
-      const apps = [];
-      for (const app of APPS) {
+      const detail = args.detail || 'brief';
+      if (!['brief', 'full'].includes(detail)) {
+        throw new Error('detail must be "brief" or "full"');
+      }
+      const apps = await Promise.all(APPS.map(async (app) => {
         const cli = cliFor(app);
-        apps.push({
+        return {
           id: app.id,
           label: app.label,
           purpose: app.kind,
-          version: cli ? await versionOf(app) : null,
+          version: detail === 'full' && cli ? await versionOf(app) : null,
           installed: !!cli,
           cli: cli || null,
           run_style: app.style,
-        });
-      }
+        };
+      }));
+      if (detail === 'full') return { installed_count: apps.filter((a) => a.installed).length, apps };
+
+      const installed = apps.filter((a) => a.installed).map((a) => a.id);
+      const missing = apps.filter((a) => !a.installed).map((a) => a.id);
       return {
-        installed_count: apps.filter((a) => a.installed).length,
-        apps,
-        note: 'Use artcraft_commands for exact command IDs, artcraft_run to execute them.',
+        installed_count: installed.length,
+        installed,
+        ...(missing.length ? { missing } : {}),
       };
     }
 
@@ -315,27 +406,35 @@ async function callTool(name, args) {
         throw new Error('detail must be "auto", "none", or "full"');
       }
       const limit = limitValue(args.limit);
+      const maxParamChars = clampInt(
+        args.max_param_chars,
+        DEFAULT_MAX_PARAM_CHARS,
+        256,
+        MAX_PARAM_CHARS
+      );
 
       // The registry lives on disk after the first read; a cache hit never
       // spawns the CLI. The cache is keyed by the CLI's path, mtime and size,
       // so an app update invalidates it automatically.
       const entry = await getRegistry(app, cli, { refresh: args.refresh === true });
       const norm = entry.commands;
-      const cache = {
-        hit: entry.cached,
-        file: entry.file,
-        fetched_at: entry.fetchedAt,
-        ...(entry.stale ? { stale: true } : {}),
-      };
+      const stale = entry.stale ? { stale: true } : {};
+      const cache = args.cache_info === true ? {
+        cache: {
+          hit: entry.cached,
+          file: entry.file,
+          fetched_at: entry.fetchedAt,
+        },
+      } : {};
 
       if (!norm.length) {
         return {
           app: key,
-          source: entry.source,
-          cache,
           detail: 'none',
           note: 'This app exposes no command registry; use artcraft_cli / artcraft_help with its subcommands directly.',
           usage: entry.usage || '',
+          ...cache,
+          ...stale,
         };
       }
 
@@ -351,15 +450,11 @@ async function callTool(name, args) {
         }
         return {
           app: key,
-          source: entry.source,
-          cache,
           detail: 'describe',
-          total: norm.length,
-          requested: requested.length,
-          matched: found.length,
           ...(missing.length ? { missing } : {}),
-          commands: found.map((c) => projectCommand(c, 'full')),
-          hint: missing.length ? `Unknown ids: ${missing.join(', ')}. Use filter to find them.` : undefined,
+          commands: found.map((c) => projectCommand(c, 'full', { maxParamChars })),
+          ...cache,
+          ...stale,
         };
       }
 
@@ -367,27 +462,28 @@ async function callTool(name, args) {
       const full = detail === 'full'
         || (detail === 'auto' && hit.length > 0 && hit.length <= 3);
       const visible = hit.slice(0, limit);
-      const commands = visible.map(({ command }) => projectCommand(command, full ? 'full' : 'list'));
+      const commands = visible.map(({ command }) => projectCommand(
+        command,
+        full ? 'full' : 'list',
+        { maxParamChars }
+      ));
 
       let hint;
       if (hit.length > limit) {
-        hint = `Showing ${limit} of ${hit.length} matches — narrow the filter or pass ids.`;
-      } else if (!full) {
-        hint = hit.length
-          ? `${hit.length} matches; pass ids:[...] to get params for the commands you will run.`
-          : 'No commands matched; try a different filter.';
+        hint = `Showing ${limit} of ${hit.length}; narrow the filter or pass ids.`;
+      } else if (!hit.length) {
+        hint = 'No commands matched.';
       }
 
       return {
         app: key,
-        source: entry.source,
-        cache,
         detail: full ? 'full' : 'list',
-        total: norm.length,
         matched: hit.length,
-        truncated: hit.length > limit,
+        ...(hit.length > limit ? { truncated: true } : {}),
         commands,
         hint,
+        ...cache,
+        ...stale,
       };
     }
 
@@ -398,43 +494,73 @@ async function callTool(name, args) {
 
       const mode = previewMode(args.preview);
       const maxImages = previewMaxImages(args.preview_max_images);
-      const maxOutput = clampInt(args.max_output_chars, DEFAULT_MAX_OUTPUT_CHARS, 1000, 200000);
+      const maxOutput = clampInt(args.max_output_chars, DEFAULT_MAX_OUTPUT_CHARS, 500, 50000);
       const maxString = clampInt(args.max_string_chars, DEFAULT_MAX_STRING_CHARS, 256, 65536);
+      const maxResult = clampInt(args.max_result_chars, 8000, 1000, 50000);
+      const timeoutMs = clampInt(args.timeout_ms, 120000, 1000, 1800000);
 
       const argv = app.build({ steps, input: args.input, output: args.output, params: args.params });
       let r;
       try {
-        r = await execFile(cli, argv, { timeoutMs: args.timeout_ms ?? 120000 });
+        r = await execFile(cli, argv, {
+          timeoutMs,
+          captureMaxChars: captureBudget(maxOutput),
+        });
       } finally {
-        cleanupTempFiles(argv);
+        cleanupGeneratedFiles(argv);
       }
       const parsed = parseJsonLines(r.stdout);
       // batch-json apps wrap the step results in {completed, failed, results}.
       const batch = app.style === 'batch-json' && parsed.length === 1
         && parsed[0] && typeof parsed[0] === 'object' && Array.isArray(parsed[0].results)
         ? parsed[0] : null;
-      const results = batch ? batch.results : parsed;
+      const rawResults = batch ? batch.results : parsed;
+      const compact = compactRunResults(rawResults);
+      const safeResults = sanitizeValue(compact.results, { maxStringChars: maxString });
+      const boundedResults = boundArray(safeResults, maxResult, key);
+      const boundedErrors = compact.errors
+        ? boundArray(
+          sanitizeValue(compact.errors, { maxStringChars: maxString }),
+          Math.min(maxResult, 4000),
+          key,
+          'errors'
+        )
+        : null;
 
       const images = [];
       const result = {
-        app: key,
-        run_style: app.style,
-        argv: r.argv,
         exit_code: r.code,
-        timed_out: !!r.timedOut,
-        results: sanitizeValue(results, { maxStringChars: maxString }),
+        ...(r.timedOut ? { timed_out: true } : {}),
+        results: boundedResults.value,
+        ...(boundedResults.truncated ? {
+          results_truncated: true,
+          results_file: boundedResults.file,
+          results_chars: boundedResults.chars,
+          omitted_results: boundedResults.omitted,
+        } : {}),
+        ...(boundedErrors ? { errors: boundedErrors.value } : {}),
+        ...(boundedErrors?.truncated ? {
+          errors_truncated: true,
+          errors_file: boundedErrors.file,
+          errors_chars: boundedErrors.chars,
+        } : {}),
         ...(batch ? { batch: { completed: batch.completed, failed: batch.failed } } : {}),
         ...streamFields(r.stdout, {
           app: key, kind: 'stdout', maxChars: maxOutput, maxStringChars: maxString,
-          include: args.include_stdout === true || results.length === 0,
+          include: args.include_stdout === true || rawResults.length === 0,
+          streamTruncated: r.stdoutTruncated, streamFile: r.stdoutFile,
+          streamChars: r.stdoutChars, writeError: r.stdoutWriteError,
         }),
         ...streamFields(r.stderr, {
           app: key, kind: 'stderr', maxChars: maxOutput, maxStringChars: maxString,
+          streamTruncated: r.stderrTruncated, streamFile: r.stderrFile,
+          streamChars: r.stderrChars, writeError: r.stderrWriteError,
         }),
+        ...(r.code !== 0 ? { argv: r.argv } : {}),
       };
 
       if (maxImages > 0 && mode !== 'none') {
-        const found = previewFromRun({ output: args.output, results });
+        const found = previewFromRun({ output: args.output, results: rawResults });
         if (found.image) {
           images.push({ data: found.image.data, mimeType: found.image.mimeType });
           result.preview = imageMeta(found.image);
@@ -453,18 +579,42 @@ async function callTool(name, args) {
       const { key, app, cli } = requireApp(args.app);
       const argv = (args.args || []).map(String);
       const mode = previewMode(args.preview);
-      const maxOutput = clampInt(args.max_output_chars, DEFAULT_MAX_OUTPUT_CHARS, 1000, 200000);
+      const maxOutput = clampInt(args.max_output_chars, DEFAULT_MAX_OUTPUT_CHARS, 500, 50000);
       const maxString = clampInt(args.max_string_chars, DEFAULT_MAX_STRING_CHARS, 256, 65536);
+      const maxResult = clampInt(args.max_result_chars, 8000, 1000, 50000);
+      const timeoutMs = clampInt(args.timeout_ms, 120000, 1000, 1800000);
 
-      const r = await execFile(cli, argv, { timeoutMs: args.timeout_ms ?? 120000 });
+      const r = await execFile(cli, argv, {
+        timeoutMs,
+        captureMaxChars: captureBudget(maxOutput),
+      });
+      const parsed = parseJsonLines(r.stdout);
+      const structured = parsed.some((item) => item && typeof item === 'object');
+      const parsedValue = sanitizeValue(parsed.length === 1 ? parsed[0] : parsed, {
+        maxStringChars: maxString,
+      });
+      const boundedResult = structured ? boundValue(parsedValue, maxResult, key) : null;
       const images = [];
       const result = {
-        app: key,
-        argv: r.argv,
         exit_code: r.code,
-        timed_out: !!r.timedOut,
-        ...streamFields(r.stdout, { app: key, kind: 'stdout', maxChars: maxOutput, maxStringChars: maxString }),
-        ...streamFields(r.stderr, { app: key, kind: 'stderr', maxChars: maxOutput, maxStringChars: maxString }),
+        ...(r.timedOut ? { timed_out: true } : {}),
+        ...(boundedResult ? { result: boundedResult.value } : {}),
+        ...(boundedResult?.truncated ? {
+          result_truncated: true,
+          result_chars: boundedResult.chars,
+        } : {}),
+        ...streamFields(r.stdout, {
+          app: key, kind: 'stdout', maxChars: maxOutput, maxStringChars: maxString,
+          include: !structured || args.include_stdout === true,
+          streamTruncated: r.stdoutTruncated, streamFile: r.stdoutFile,
+          streamChars: r.stdoutChars, writeError: r.stdoutWriteError,
+        }),
+        ...streamFields(r.stderr, {
+          app: key, kind: 'stderr', maxChars: maxOutput, maxStringChars: maxString,
+          streamTruncated: r.stderrTruncated, streamFile: r.stderrFile,
+          streamChars: r.stderrChars, writeError: r.stderrWriteError,
+        }),
+        ...(r.code !== 0 ? { argv: r.argv } : {}),
       };
 
       if (mode !== 'none') {
@@ -484,15 +634,24 @@ async function callTool(name, args) {
     case 'artcraft_help': {
       const { key, app, cli } = requireApp(args.app);
       const argv = args.args && args.args.length ? args.args : ['--help'];
-      const r = await execFile(cli, argv, { timeoutMs: 30000 });
+      const maxOutput = clampInt(args.max_output_chars, DEFAULT_MAX_OUTPUT_CHARS, 500, 30000);
+      const r = await execFile(cli, argv, {
+        timeoutMs: 30000,
+        captureMaxChars: captureBudget(maxOutput),
+      });
+      const fromStdout = !!r.stdout;
       const usage = redactBase64Text(r.stdout || r.stderr || '', { maxStringChars: DEFAULT_MAX_STRING_CHARS });
-      const t = truncateStream(usage, { app: key, kind: 'help', maxChars: DEFAULT_MAX_OUTPUT_CHARS });
+      const t = fromStdout && r.stdoutTruncated
+        ? { text: usage.slice(0, maxOutput), truncated: true, file: r.stdoutFile, chars: r.stdoutChars }
+        : !fromStdout && r.stderrTruncated
+          ? { text: usage.slice(0, maxOutput), truncated: true, file: r.stderrFile, chars: r.stderrChars }
+          : truncateStream(usage, { app: key, kind: 'help', maxChars: maxOutput });
       return {
-        app: key,
-        argv: r.argv,
-        exit_code: r.code,
+        ...(r.code !== 0 ? { exit_code: r.code } : {}),
+        ...(r.timedOut ? { timed_out: true } : {}),
         usage: t.text,
         ...(t.truncated ? { usage_truncated: true, usage_file: t.file, usage_chars: t.chars } : {}),
+        ...(r.code !== 0 ? { argv: r.argv } : {}),
       };
     }
 
@@ -530,7 +689,7 @@ async function handle(msg) {
     reply(id, {
       protocolVersion: PROTOCOL,
       capabilities: { tools: { listChanged: false } },
-      serverInfo: { name: 'artcraft-command-bridge', version: '1.2.0' },
+      serverInfo: { name: 'artcraft-command-bridge', version: SERVER_VERSION },
     });
     return;
   }
@@ -552,12 +711,11 @@ async function handle(msg) {
         }
       }
 
+      const response = { content };
+      if (process.env.ARTCRAFT_STRUCTURED === '1') response.structuredContent = result;
       send({
         jsonrpc: '2.0', id,
-        result: {
-          content,
-          structuredContent: result,
-        },
+        result: response,
       });
     } catch (e) {
       send({

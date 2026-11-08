@@ -9,10 +9,10 @@
 每个 Crafting App 都自带 MCP 服务器，把每条引擎命令摊成独立工具。15 个全装 = **871 个工具 / 640.8 KB schema ≈ 16.4 万 token** 常驻上下文，而且每轮请求都要重发一遍。这个桥接器把同一份命令注册表收进一个**目录**和一个**分发器**：
 
 ```text
-871 工具 · 640.8 KB · ~164,000 token   →   5 工具 · 5.2 KB · ~1,300 token
+871 工具 · 640.8 KB · ~164,000 token   →   5 工具 · 4.8 KB · ~1,200 token
 ```
 
-2026-11-05 在 Windows 上装齐 15 个 App 后实测。
+2026-11-08 在 Windows 上装齐 15 个 App 后实测。
 
 ---
 
@@ -25,7 +25,7 @@ Crafting Apps 本身已经有一套非常适合做这件事的模型：
 - `commands` —— 列出稳定命令 ID 及其参数
 - `run` / `batch` —— 按 ID 执行
 
-15 个 App 实测共 **7631 条命令 ID**。而原厂 MCP 暴露的 871 个工具，只是同一份注册表的一个子集视图。所以这些工具不需要被摊平成 871 条并列项 —— 它们需要的是一份**目录**和一个**分发器**，这就是这个桥接器。
+15 个 App 在 2026-11-08 实测共 **7748 条命令 ID**。而原厂 MCP 暴露的 871 个工具，只是同一份注册表的一个子集视图。所以这些工具不需要被摊平成 871 条并列项 —— 它们需要的是一份**目录**和一个**分发器**，这就是这个桥接器。
 
 只有 PdfCraft 自带一个接近按需的模式（`pdfcraft-cli mcp --compact`，只暴露核心工具 + `tool_search`/`tool_call`）；另外 14 个没有等价的 `--compact` 模式，所以没有统一开关可开。
 
@@ -75,6 +75,9 @@ OpenCode（`~/.config/opencode/opencode.json`）：
 npm install -g artcraft-command-bridge
 ```
 
+npm 包会一并发布 `skills/artcraft/SKILL.md`。如果客户端不会自动发现包内
+skill，请把该目录复制或链接到客户端配置的 skills 目录。
+
 ### 3. 重启并确认
 
 重启客户端让工具加载。然后调用 `artcraft_apps`：它会列出全部 15 个 App，`installed_count` 表示本机实际安装了几个。
@@ -83,8 +86,8 @@ npm install -g artcraft-command-bridge
 
 | 工具 | 作用 |
 |---|---|
-| `artcraft_apps` | 15 个 App 的用途、版本、安装状态、run 参数风格。从这里开始。 |
-| `artcraft_commands` | 列命令 ID 或 describe 精确 ID；默认列表模式，`ids` 返回完整参数，注册表本地缓存。 |
+| `artcraft_apps` | 默认只返回已安装/缺失列表；`detail:"full"` 才带版本、路径和用途。 |
+| `artcraft_commands` | 列命令 ID 或 describe 精确 ID；列表模式只返回 ID，参数长度有上限，注册表本地缓存。 |
 | `artcraft_run` | 按 ID 顺序执行命令。结果精简、输出截断、base64 替换，可选预览图。 |
 | `artcraft_cli` | 逃生舱 —— 透传任意子命令，带输出截断和图片预览。 |
 | `artcraft_help` | 某 App 自己的 `--help` 全文。 |
@@ -93,11 +96,11 @@ npm install -g artcraft-command-bridge
 
 默认路径按上下文成本做了约束：
 
-- `artcraft_commands` 默认是**列表模式**（`limit:20`，只返回 `{id,label}`）。filter 命中 ≤3 条时直接给完整 `params`；更宽的查询保持精简。用 `ids:[...]`（最多 8 个）只为准备执行的命令取完整参数，精确查询不会多一次 describe 调用。
-- `artcraft_run` 有解析出的 `results` 时不再重复返回原始 `stdout`；需要时传 `include_stdout:true`。输出超过 `max_output_chars`（默认 20k）会截断，并把全文写入临时文件（`stdout_file` / `stderr_file`）。
-- 超长 base64/图片字符串会替换为 `{ "omitted": true, "chars": 12345, "type": "image/png" }`，不会进入 `text` 或 `structuredContent`。
-- 视觉结果最多附 **1 张** MCP image block；图片不会在文本里重复 base64。非视觉任务用 `preview:"none"`。`artcraft_cli` 会从 `-o` / `--out` / `--export` 推断，也可以显式传 `preview_file`。
-- MCP 的文本内容是紧凑 JSON；`structuredContent` 保留同一份数据，但不美化、不含图片字节。
+- `artcraft_commands` 默认是**列表模式**（`limit:10`，只返回命令 ID）。filter 命中 ≤3 条时直接给 `params`；更宽的查询保持精简。用 `ids:[...]`（最多 6 个）只为准备执行的命令取参数，单条参数默认最多 2,400 字符。
+- `artcraft_run` 有解析出的 `results` 时不再重复返回原始 `stdout`；需要时传 `include_stdout:true`。原始输出默认最多 6,000 字符，结构化结果默认最多 8,000 字符，全文写入临时文件。
+- 超长 base64/图片字符串会替换为紧凑的 `omitted` 描述。
+- 图片预览**默认关闭**。需要视觉验收时显式传 `preview:"auto"` 或 `"image"`；最多 1 张，最长边超过 1,024px 或文件超过 4MB 时只返回警告。
+- MCP 文本内容是紧凑 JSON；重复的 `structuredContent` 默认关闭。只有客户端确实依赖它时才设置 `ARTCRAFT_STRUCTURED=1`。
 
 ## 15 个 App
 
@@ -117,7 +120,7 @@ npm install -g artcraft-command-bridge
 | **FigCraft** (`figcraft`) | UI 界面、组件、原型 | `script-json` | `commands --json` |
 | **TextureCraft** (`texturecraft`) | 3D 贴图集、绘制、烘焙 | `batch-json` | `commands`（文本表） |
 | **MaterialCraft** (`materialcraft`) | 程序化 PBR 材质、节点图 | `batch-json` | `commands`（JSON） |
-| **PdfCraft** (`pdfcraft`) | PDF 合并/拆分、表单、OCR、脱敏 | `positional-kv` | `tools` |
+| **PdfCraft** (`pdfcraft`) | PDF 合并/拆分、表单、OCR、脱敏 | `tool-script` | `tools` |
 
 风格速查：
 
@@ -131,7 +134,7 @@ script-json     run <script.json>                 FigCraft ({command, params})
 script-jsonl    run <script.jsonl>                FilmCraft ({id, params})
 batch-json      batch <script.json>               TextureCraft, MaterialCraft
                                                    ({open, steps, save})
-positional-kv   run <tool> key=value              PdfCraft（tool 名，不是命令 ID）
+tool-script     run --script steps.json          PdfCraft（{tool, args}）
 ```
 
 注册表说明：
@@ -225,10 +228,10 @@ node tools/sync-registry.js --clear    # 清空缓存
 - **15 个由命令驱动的 Crafting App。** Craft Anything 是一个带自有工具协议的 agent 前端，不是 `commands` + `run`/`batch` 引擎，所以桥接器不包装它。
 - **桥接器不安装、不更新、不启动 GUI App。** 这些交给 ArtCraft Launcher 或各 App 的安装包。
 - **`input`/`output` 支持情况不同：**
-  - 两者都支持：PhotoCraft、VectorCraft、SoundCraft、FilmCraft、FigCraft、TextureCraft、MaterialCraft
-  - 只支持 input：DesignCraft、GridCraft、DeckCraft、WordCraft、CADCraft
-  - 只支持 output：PdfCraft
-  - 两者都不支持：LightCraft、EffectCraft
+  - 两者都支持：PhotoCraft、VectorCraft、SoundCraft、FilmCraft、FigCraft、EffectCraft、TextureCraft、MaterialCraft
+  - 运行/文件输出：DesignCraft、GridCraft、DeckCraft、WordCraft、CADCraft
+  - 图片输出：PdfCraft（render/图片类工具使用 `--out`）
+  - 需走各自导入/导出流程：LightCraft
 - **TextureCraft / MaterialCraft** 使用 batch JSON 脚本。`output` 保存原生工程（`.tcraft` / `.sbs`）；PNG/EXR 贴图导出走 `artcraft_cli export`。
 
 ## 和现有方案的差别
@@ -240,7 +243,10 @@ node tools/sync-registry.js --clear    # 清空缓存
 ## 开发
 
 ```sh
-npm test                          # 握手 + FigCraft + token 测试
+npm test                          # 适配器 + 有界 I/O + MCP + token 测试
+npm run test:adapters              # 各 App argv 与临时文件安全
+npm run test:exec                  # 流式捕获与 UTF-8
+npm run test:output                # 原生/导出文件是否真正落盘
 npm run test:registry             # 先 cache miss，再 cache hit
 npm run test:token                # list/describe、截断、base64、预览
 node tools/sync-registry.js       # 把命令注册表拉到本地缓存

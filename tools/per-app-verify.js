@@ -42,13 +42,13 @@ async function call(rpc, name, args) {
       console.log(`${app.padEnd(13)} commands: ${cmds.error ? 'ERR ' + cmds.error.slice(0, 70) : 'RAW ' + String(cmds.raw).slice(0, 70).replace(/\n/g, ' ')}`);
       continue;
     }
-    const ids = (cmds.commands || []).map((c) => c.id);
+    const ids = (cmds.commands || []).map((c) => typeof c === 'string' ? c : c.id);
     const first = ids[0];
-    console.log(`\n=== ${app} === total=${cmds.total} sample=${JSON.stringify(ids)}`);
+    console.log(`\n=== ${app} === matched=${cmds.matched} sample=${JSON.stringify(ids)}`);
 
     if (!first) { console.log('  (no commands exposed)'); continue; }
     const run = await call(rpc, 'artcraft_run', { app, steps: [{ id: first, params: {} }], timeout_ms: 60000 });
-    const argv = JSON.stringify(run.argv || []);
+    const argv = run.argv ? JSON.stringify(run.argv) : '(omitted on success)';
     if (run.error) {
       console.log(`  run(${first}) ERROR ${run.error.slice(0, 90)}`);
       console.log(`  argv ${argv}`);

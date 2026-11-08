@@ -16,10 +16,10 @@ request. This bridge keeps the same command registries behind a directory and a
 dispatcher:
 
 ```text
-871 tools · 640.8 KB · ~164,000 tokens   →   5 tools · 5.2 KB · ~1,300 tokens
+871 tools · 640.8 KB · ~164,000 tokens   →   5 tools · 4.8 KB · ~1,200 tokens
 ```
 
-Measured on 2026-11-05 with all 15 apps installed on Windows.
+Schema measured on 2026-11-08 with all 15 apps installed on Windows.
 
 ---
 
@@ -37,7 +37,7 @@ The Crafting Apps already share one model that is perfect for this:
 - `commands` — lists stable command IDs with their parameters
 - `run` / `batch` — executes those IDs
 
-Measured across the 15 apps, that is **7631 command IDs**. The 871 tools the
+Measured across the 15 apps on 2026-11-08, that is **7748 command IDs**. The 871 tools the
 apps' own MCP servers expose are only a subset view of the same registry. So
 the tools do not need to be flattened into 871 separate entries — they need a
 **directory** and a **dispatcher**, which is what this is.
@@ -95,6 +95,10 @@ Or install the package globally:
 npm install -g artcraft-command-bridge
 ```
 
+The npm package includes `skills/artcraft/SKILL.md`; copy or link that directory
+to the skill location used by your MCP client when the client does not discover
+package skills automatically.
+
 ### 3. Restart and verify
 
 Restart the client so the tools load. Then call `artcraft_apps`: it lists all
@@ -105,8 +109,8 @@ machine.
 
 | Tool | What it does |
 |---|---|
-| `artcraft_apps` | The 15 apps: purpose, version, install status, and how their `run` argv is built. Start here. |
-| `artcraft_commands` | List command IDs or describe exact IDs. List mode is default; `ids` returns full params. Cached locally. |
+| `artcraft_apps` | Compact installed/missing list by default; `detail:"full"` adds versions, paths and purposes. |
+| `artcraft_commands` | List command IDs or describe exact IDs. List mode returns IDs only; parameter strings are capped. Cached locally. |
 | `artcraft_run` | Execute commands in order. Compact results, truncated output, base64 redaction, optional preview. |
 | `artcraft_cli` | Escape hatch — run any CLI subcommand verbatim, with output truncation and image preview. |
 | `artcraft_help` | An app's own `--help` text. |
@@ -115,23 +119,19 @@ machine.
 
 The default path is optimized for context:
 
-- `artcraft_commands` starts in **list mode** (default `limit:20`, only
-  `{id,label}`). A filter with at most 3 matches returns full `params`; broader
-  matches stay compact. Pass `ids:[...]` (max 8) to fetch full params only for
-  the commands you will actually run. There is no extra describe round-trip for
-  exact filters.
+- `artcraft_commands` starts in **list mode** (default `limit:10`, IDs only).
+  A filter with at most 3 matches returns `params`; broader matches stay
+  compact. Pass `ids:[...]` (max 6) for commands you will run. Parameter strings
+  are capped at 2,400 chars by default.
 - `artcraft_run` omits raw `stdout` when parsed `results` exist. Set
-  `include_stdout:true` to keep it. Output over `max_output_chars` (default
-  20k) is truncated and the full text is written to a temp file
-  (`stdout_file` / `stderr_file`).
-- Long base64/image strings are replaced with
-  `{ "omitted": true, "chars": 12345, "type": "image/png" }`; they never enter
-  `text` or `structuredContent`.
-- Visual outputs attach **at most one** MCP image block. The image is not
-  duplicated as base64 in text; use `preview:"none"` for non-visual tasks.
-  `artcraft_cli` infers `-o` / `--out` / `--export`, or accepts `preview_file`.
-- MCP text content is compact JSON. `structuredContent` carries the same data
-  without pretty-printing or image bytes.
+  `include_stdout:true` to keep it. Raw output is capped at 6,000 chars and
+  structured results at 8,000 chars; full streams/results go to temp files.
+- Long base64/image strings are replaced with a compact `omitted` descriptor.
+- Image previews are **off by default**. Set `preview:"auto"` or `"image"` for
+  visual verification; at most one image is attached. Images over 1,024px or
+  4MB are rejected with a warning so a smaller preview can be exported.
+- MCP text content is compact JSON. The duplicate `structuredContent` payload
+  is off by default; set `ARTCRAFT_STRUCTURED=1` only when a client requires it.
 
 ## The 15 apps
 
@@ -151,7 +151,7 @@ The default path is optimized for context:
 | **FigCraft** (`figcraft`) | UI screens, components, prototypes | `script-json` | `commands --json` |
 | **TextureCraft** (`texturecraft`) | 3D texture sets, painting, baking | `batch-json` | `commands` (text table) |
 | **MaterialCraft** (`materialcraft`) | Procedural PBR materials, node graphs | `batch-json` | `commands` (JSON) |
-| **PdfCraft** (`pdfcraft`) | PDF merge/split, forms, OCR, redact | `positional-kv` | `tools` |
+| **PdfCraft** (`pdfcraft`) | PDF merge/split, forms, OCR, redact | `tool-script` | `tools` |
 
 Style reference:
 
@@ -165,7 +165,7 @@ script-json     run <script.json>                 FigCraft ({command, params})
 script-jsonl    run <script.jsonl>                FilmCraft ({id, params})
 batch-json      batch <script.json>               TextureCraft, MaterialCraft
                                                    ({open, steps, save})
-positional-kv   run <tool> key=value              PdfCraft (tool names, not IDs)
+tool-script     run --script steps.json          PdfCraft ({tool, args})
 ```
 
 Registry notes:
@@ -278,11 +278,11 @@ fails as a whole because one app is missing.
 - **The bridge does not install, update, or launch GUI apps.** Use the ArtCraft
   Launcher or the apps' installers for that.
 - **`input`/`output` support varies:**
-  - both: PhotoCraft, VectorCraft, SoundCraft, FilmCraft, FigCraft, TextureCraft,
-    MaterialCraft
-  - input only: DesignCraft, GridCraft, DeckCraft, WordCraft, CADCraft
-  - output only: PdfCraft
-  - neither: LightCraft, EffectCraft
+  - both: PhotoCraft, VectorCraft, SoundCraft, FilmCraft, FigCraft, EffectCraft,
+    TextureCraft, MaterialCraft
+  - run/file output: DesignCraft, GridCraft, DeckCraft, WordCraft, CADCraft
+  - image output: PdfCraft (`--out` for render/image tools)
+  - requires CLI-specific import/export flow: LightCraft
 - **TextureCraft / MaterialCraft** use a batch JSON script. `output` saves the
   native project (`.tcraft` / `.sbs`); export PNG/EXR maps with
   `artcraft_cli export`.
@@ -306,7 +306,10 @@ fails as a whole because one app is missing.
 ## Development
 
 ```sh
-npm test                          # handshake + FigCraft + token-size tests
+npm test                          # adapters + bounded I/O + MCP + token tests
+npm run test:adapters              # per-app argv and temp-file safety
+npm run test:exec                  # streaming capture and UTF-8
+npm run test:output                # native/export file creation
 npm run test:registry             # cache miss then cache hit
 npm run test:token                # list/describe, truncation, base64, preview
 node tools/sync-registry.js       # pull command registries into the local cache

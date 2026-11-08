@@ -1,106 +1,60 @@
 ---
 name: artcraft
-description: >
-  Route creative-file work to the right ArtCraft app and drive it through the
-  artcraft-command-bridge MCP (5 tools). Use for photo/RAW editing, logos and vector art,
-  UI screens, page layout, spreadsheets, documents, slide decks, audio, video, motion
-  graphics, CAD, 3D texture painting, procedural materials, and PDF operations with
-  PhotoCraft, LightCraft, VectorCraft, FigCraft, DesignCraft, GridCraft, WordCraft,
-  DeckCraft, SoundCraft, FilmCraft, EffectCraft, CADCraft, TextureCraft,
-  MaterialCraft, or PdfCraft — including "which app should I use?". Router only: discover
-  commands live with artcraft_commands; do not preload per-app catalogs.
+description: Route deterministic creative-file work to the correct ArtCraft app and drive it through artcraft-command-bridge. Use for photo/RAW, vector/UI/print, spreadsheets, documents/slides, audio/video/motion, CAD, 2D/3D textures/materials and PDFs.
 ---
 
-# ArtCraft — pick the app, then drive the bridge
+# ArtCraft: choose an app, discover, run, verify
 
-All 15 ArtCraft apps are deterministic headless engines. They are the right tool for
-exact, repeatable creative output — not image or video generation models.
+ArtCraft apps are deterministic headless engines. The bridge exposes five MCP tools; command catalogs stay on disk until queried.
 
-## Core rules
+## Rules
 
-1. **One task, one app.** Cross apps only when the deliverable changes medium (FigCraft
-   screen → DeckCraft slide): app A writes a file, app B opens it.
-2. **Never guess command IDs.** The live registry is authoritative. Query
-   `artcraft_commands` for the chosen app before composing steps.
-3. **This skill is the router only.** Do not preload or generate per-app catalogs.
-   Discover command IDs with `artcraft_commands` and CLI flags with `artcraft_help`.
-4. **Verify the artifact, not the exit code.** Re-open with `info` or render a preview
-   and look at it.
+1. Keep one medium in one app. Chain apps only through a saved file.
+2. Never guess a command ID or CLI flag.
+3. Discover narrowly, execute multiple steps in one call, and inspect the artifact before reporting success.
+4. Ask for raw stdout, full parameter schemas and image previews only when they are useful.
 
-## 1. Check what is installed
+## 1. Check installation
 
-Call `artcraft_apps` first. It returns each app's `installed`, `version`, `run_style`,
-and CLI path.
+Call `artcraft_apps` without arguments. Its compact result contains `installed`, `missing` and `installed_count`. Use `detail:"full"` only for versions, paths or diagnostic purposes. If the app is missing, report it; do not silently substitute another app.
 
-- `installed: false` → tell the user to install that app (getartcraft.com/apps, or set
-  `ARTCRAFT_<APP>_CLI`). Do not silently substitute a different app.
-- Never assume an app is present; the list changes per machine.
+## 2. Route
 
-## 2. Route by deliverable
-
-| App | Pick it when | Not for |
+| App | Use for | Avoid |
 |---|---|---|
-| **photocraft** | Pixel editing of existing images: retouch, composite, layers, masks, adjustments, PSD | vector logos (vectorcraft), camera RAW development (lightcraft) |
-| **lightcraft** | Camera RAW, culling, non-destructive develop settings, batch variants | pixel compositing (photocraft) |
-| **vectorcraft** | Paths/bezier, logos, icons, illustration, print-ready vector | pixel retouch (photocraft) |
-| **figcraft** | UI screens, frames, components, design tokens, prototypes | print/page layout (designcraft) |
-| **texturecraft** | 3D texture painting on meshes: texture sets, paint/fill layers, smart materials, bake and export maps | procedural material graphs (materialcraft), flat image retouch (photocraft) |
-| **materialcraft** | Procedural PBR materials: node graphs, cook, render, export maps | painting/baking on a specific mesh (texturecraft) |
-| **designcraft** | Multi-page print: brochures, newsletters, master pages, PDF/X | single-page UI (figcraft), slides (deckcraft) |
-| **gridcraft** | Tabular data, formulas, charts, xlsx/csv | document prose (wordcraft) |
-| **wordcraft** | Long-form documents, reports, letters, docx | slide decks (deckcraft), page layout (designcraft) |
-| **deckcraft** | Slide decks, pptx | print layout (designcraft) |
-| **soundcraft** | Audio editing, podcast, mix/master | video (filmcraft) |
-| **filmcraft** | Video timeline, cuts, transitions, captions, MP4 | motion graphics (effectcraft) |
-| **effectcraft** | Motion graphics, keyframes, titles, comps | live-action editing (filmcraft) |
-| **cadcraft** | CAD drawings, floor plans, dimensions, DXF/DWG | vector illustration (vectorcraft) |
-| **pdfcraft** | PDF page operations: merge/split, forms, OCR, redact | authoring the source document (wordcraft/designcraft) |
+| `photocraft` | pixel editing, compositing, masks, PSD | RAW development; vector logos |
+| `lightcraft` | camera RAW, culling, develop variants | layered pixel compositing |
+| `vectorcraft` | paths, icons, logos, print vector | raster retouch |
+| `figcraft` | UI screens, components, design tokens | print layout; slides |
+| `designcraft` | multipage print, masters, PDF/X | single-screen UI |
+| `gridcraft` | tables, formulas, charts, xlsx/csv | prose documents |
+| `wordcraft` | reports, letters, long documents, docx | slides; page-layout artwork |
+| `deckcraft` | slide decks, pptx | multipage print |
+| `soundcraft` | audio edit, podcast, mix/master | video editing |
+| `filmcraft` | live-action timeline, captions, MP4 | motion-graphics comps |
+| `effectcraft` | motion graphics, keyframes, titles | live-action editing |
+| `cadcraft` | CAD drawings, dimensions, DXF/DWG | illustration |
+| `texturecraft` | painting/baking maps on a mesh | reusable procedural material graphs |
+| `materialcraft` | procedural PBR graphs and material packages | painting a specific mesh |
+| `pdfcraft` | PDF input operations, forms, OCR, redaction | source-document authoring; ordinary PDF export |
 
-**Ambiguous cases**
+Ambiguities: screen → `figcraft`; printed page → `designcraft`; slide → `deckcraft`; still image → `photocraft`; editable path art → `vectorcraft`; RAW → `lightcraft`; PDF as input → `pdfcraft`; PDF merely as an export → use the source app.
 
-- Still image with no layers → photocraft; needs editable vectors → vectorcraft; camera
-  RAW → lightcraft.
-- "Design" that is a screen → figcraft; a printed page → designcraft; a slide → deckcraft.
-- Animated but not live-action → effectcraft; live-action timeline → filmcraft.
-- A model needs painted/baked texture maps → texturecraft; a reusable procedural PBR
-  material → materialcraft.
-- A PDF is the **input** → pdfcraft. A PDF is just an **export format** → use the source
-  app's export.
-- Data + prose in one deliverable → build the data in gridcraft, then embed/convert with
-  wordcraft or deckcraft.
-
-## 3. Discover the commands
+## 3. Discover commands
 
 ```jsonc
-// list mode: cheap, IDs only (default limit 20)
+// Broad search: IDs only, keep 5–10
 { "app": "figcraft", "filter": "node", "limit": 10 }
 
-// describe mode: full params only for the commands you will run
+// Exact commands you will run
 { "app": "figcraft", "ids": ["node.create"] }
 ```
 
-`artcraft_commands` has two modes:
-
-- **List** (default): returns `{id,label}` only. If `filter` matches ≤3 commands, it
-  automatically returns full `params`; broader results stay compact.
-- **Describe**: `ids:[...]` (max 8) returns full `params` for exactly those commands.
-
-Rules:
-
-- **Always pass `filter`** for discovery. Start broad ("new", "export", "text"), then
-  narrow. Use `limit` 5–10; do not pull the whole registry.
-- If the result is list mode, read `hint` and call again with `ids` for the 1–8 commands
-  you will actually run. Do not ask for `detail:"full"` just to browse.
-- `filter` matches id, label, and description; results are ranked (exact id first).
-  Multi-word queries require every word.
-- The registry is cached locally; repeat calls are a disk read, not a CLI spawn.
-  Pass `refresh: true` after an app update.
-- `params` is documentation (for PdfCraft, a JSON Schema **string**), not a structured
-  schema — read it before composing JSON.
-- `enabled: false` means unavailable right now; read `disabled_reason`.
-- PdfCraft has no `commands` subcommand; the bridge maps its `tools` list into the same
-  shape, so the same query works. Its tools are stateful: `doc_open` returns a `doc` id
-  that later steps need — keep them in the same `artcraft_run` call.
+- `filter` matches ID, label and description; multi-word filters require every term.
+- List mode returns ID strings. At most three matches are expanded automatically.
+- `ids` accepts at most six commands. Each `params` string is capped at 2,400 chars by default. If `params_truncated` is true, re-query only that ID with a larger `max_param_chars` (max 12,000).
+- Use `refresh:true` only after an app update. Use `cache_info:true` only for diagnostics.
+- PdfCraft parameter strings are JSON Schemas. Its tools are stateful: keep `doc_open` and later steps in one `artcraft_run` call.
 
 ## 4. Execute
 
@@ -110,94 +64,51 @@ Rules:
   "steps": [
     { "id": "node.create", "params": { "type": "frame", "name": "Hero", "width": 1200, "height": 800 } }
   ],
-  "input": "D:/work/existing.figcraft",
-  "output": "D:/work/result.figcraft"
+  "input": "D:/work/input.figcraft",
+  "output": "D:/work/result.figcraft",
+  "preview": "none"
 }
 ```
 
-- `steps` run in order in one engine session; each step is `{ id, params }`.
-- `input` opens an existing document; omit it to start a new one (where the app supports
-  a blank document).
-- `output` saves in the app's **native** format. For PNG/PDF/SVG/MP4 and other exports,
-  use the app's export subcommand through `artcraft_cli`.
-- The result contains per-step JSON and `exit_code`. Raw `stdout` is omitted by default
-  when `results` parsed; pass `include_stdout: true` only when debugging. `stderr` is
-  kept (truncated) for failures.
-- Output over `max_output_chars` (default 20k) is truncated; the full text is in
-  `stdout_file` / `stderr_file`. Base64/image strings over `max_string_chars` (default
-  4096) become `{ omitted: true, chars, type }` — never ask for them as text.
-- `preview` defaults to `auto`: if the output is an image, the result gets one image
-  block plus a small `preview` metadata object. Use `preview:"none"` for docx/xlsx/
-  audio/video, and `preview:"image"` when a visual artifact is required.
-- Treat a non-zero `exit_code`, a timeout, or `ok: false` as failure.
+- Steps run in order in one engine session. `input` opens an existing file; `output` uses the app-specific save/export mapping.
+- Results are compact: repeated `command`, `id`, `ok` and `status` wrappers are removed. A failure appears in `errors` and nonzero `exit_code`.
+- Raw stdout is omitted when parsed results exist. Use `include_stdout:true` only for debugging.
+- Default caps: raw output 6,000 chars, structured result 8,000 chars, long base64/image strings 2,048 chars. Full payloads are written to `stdout_file`, `stderr_file` or `results_file`.
+- `preview` defaults to `none`. For visual acceptance, export an image no larger than 1,024px on the longest side and set `preview:"auto"`; use `preview:"image"` when a preview must be returned. Limit: 4MB.
 
-**Known bridge limitation:** not every app's `run` style accepts `input`/`output`.
-LightCraft and EffectCraft accept neither; DesignCraft, GridCraft, DeckCraft, WordCraft,
-and CADCraft accept `input` but not `output`. For those, either drive the app with
-`artcraft_cli` using its own `--in`/`--save`/`--out` flags, or run the command sequence
-and then a separate export/convert call.
+Common support:
 
-TextureCraft and MaterialCraft use a **batch JSON** script and accept both: `input` is
-an existing native project (`.tcraft` / `.sbs` / `.mcraft`), and `output` saves the
-native project. To start from a mesh or a new project, use `artcraft_cli` first
-(`new builtin:cube out.tcraft`, `new empty out.sbs`). Exported PNG/EXR maps are a
-separate `export` call through `artcraft_cli`.
+- Full generic file input/output: PhotoCraft, VectorCraft, SoundCraft, FilmCraft, FigCraft, EffectCraft, TextureCraft, MaterialCraft.
+- File export through `output`: DesignCraft, GridCraft, DeckCraft, WordCraft, CADCraft.
+- SoundCraft `.scraft` saves a session; audio extensions use bounce.
+- TextureCraft/MaterialCraft `output` saves the native project. Export PNG/EXR maps with `artcraft_cli export`.
+- LightCraft uses CLI-specific `--import`, `--library`, `--script`, render or export paths through `artcraft_cli`.
+- PdfCraft `output` is mainly for image-producing tools; document outputs normally come from the selected tool parameters.
 
-## 5. Escape hatch — export, render, convert, info, batch
+## 5. Escape hatch
 
-`artcraft_cli` passes argv verbatim (no shell interpretation). Use it for:
+Use `artcraft_cli` for `export`, `render`, `convert`, `info`, folder batches and app-specific subcommands that are not command IDs. Arguments are passed without shell interpretation. JSON stdout is parsed automatically; raw stdout is opt-in.
 
-- `export` / `render` / `convert` — format changes and previews
-- `info` — document summary as JSON
-- `batch` — folder-level operations
-- app-specific subcommands that are not command IDs
+For an image preview, add `preview:"auto"` and either an image `-o`/`--out`/`--export` path or `preview_file`. Use `artcraft_help` when flags are uncertain; its output is capped at 6,000 chars by default.
 
-For image outputs, pass `preview:"auto"` and either an `-o`/`--out`/`--export` path or
-`preview_file`. The bridge validates the file (PNG/JPEG/GIF/WebP, magic bytes, ≤20 MB)
-and attaches one image block. `preview_warning` means the file was missing/invalid or
-larger than 4096 px; export a smaller preview before looking.
+## 6. Verify
 
-When unsure of flags: `artcraft_help({ app, args: ["run", "--help"] })` (some apps use
-`["help", "run"]`). Check before guessing.
+- Visual work: render/export a small preview, inspect the image block, then check layout, color, crop, truncation and whitespace. If no image came back, inspect the output path.
+- Read the same unchanged image once. Re-render after a change.
+- Nonvisual work: use `preview:"none"` and verify metadata such as pages, dimensions, duration, codec or layer count.
+- Report the absolute output path. Never claim success from `exit_code: 0` alone.
 
-## 6. Verify before reporting
+## Failure map
 
-- **Visual work: look before you report done.** Render/export a PNG, inspect the image
-  block, and check layout, color, cropping, truncation, and whitespace. If no image
-  block came back, read the output file directly. Never claim a visual result is good
-  from `exit_code: 0` alone.
-- **One modification, one look.** Do not re-read the same unchanged image on every
-  turn; re-render only after a change.
-- **Non-visual work: no images.** For docx/xlsx/audio/video, use `preview:"none"` and
-  verify metadata instead (pages, size, duration, codec, layer count).
-- `info` the output and compare it with the request.
-- If `preview_warning` reports >4096 px, use the app's `scale`/size flag to export a
-  smaller preview; don't attach a huge image.
-- Report the absolute output path.
-
-## 7. Failure map
-
-| Symptom | What to do |
+| Symptom | Action |
 |---|---|
-| `CLI not found` | App is not installed. Report the probed paths from the error; suggest install or `ARTCRAFT_<APP>_CLI`. |
-| `unknown command` | Re-query `artcraft_commands`; the ID may be wrong or belong to another app. |
-| Param shape error | Read that command's `params` string; keys must match exactly. |
-| Export/format error | `artcraft_help` for the export subcommand; flags differ per app. |
-| Timeout | Split into smaller steps or raise `timeout_ms`; video/render jobs need more. |
-| `stdout_truncated` | Read `stdout_file` if the full log is needed; otherwise the parsed `results` are enough. |
-| `preview_warning` / no image block | Check the output path or pass `preview_file`; export an image with `artcraft_cli`; keep it ≤4096 px. |
-| `omitted: true` in a result | That was base64/image bytes. Do not request it as text; write an image file and use preview/read. |
-| Empty/blank output | Check that the document had a page/frame/element, and that save used the native format. |
+| App in `missing` | Install it or set `ARTCRAFT_<APP>_CLI`. |
+| Unknown command/parameters | Re-query the exact ID and inspect `params`. |
+| `stdout_truncated` / `results_truncated` | Read the referenced file only if needed. |
+| `preview_warning` | Fix the path or export a smaller PNG/JPEG/WebP/GIF. |
+| `omitted: true` | This is binary/base64 data; write a file and preview it. |
+| Timeout | Split the job or raise `timeout_ms` for video/render work. |
 
-## On-demand escalation (important)
+## Token discipline
 
-This skill stays a router. When a task lands on one app:
-
-1. Query that app's command registry with `artcraft_commands` (cached; pass
-   `refresh: true` only after an app update).
-2. Check its CLI help for export/import flags.
-3. Only if the app becomes a repeated workload, add
-   `skills/artcraft-<app>/SKILL.md` with **tested** recipes, formats, and pitfalls.
-
-Do not create 15 app skills up front, and do not read whole 2 MB command registries —
-filter them.
+Use `filter` plus `limit` 5–10, then `ids` for only the commands being executed. Put multiple operations in one `artcraft_run`. Do not request raw stdout, full parameter catalogs or image previews routinely. For tasks with several unrelated stages, prefer a few compact calls over repeatedly fetching large command descriptions.

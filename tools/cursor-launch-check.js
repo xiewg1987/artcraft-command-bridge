@@ -23,8 +23,9 @@ p.stdout.on('data', (d) => {
       console.log('schema     :', (Buffer.byteLength(JSON.stringify(t), 'utf8') / 1024).toFixed(1), 'KB');
       p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'artcraft_apps', arguments: {} } }) + '\n');
     } else if (m.id === 3 && m.result) {
-      const apps = JSON.parse(m.result.content[0].text).apps;
-      console.log('apps       :', apps.length, '->', apps.map((a) => a.id).join(', '));
+      const data = JSON.parse(m.result.content[0].text);
+      const apps = data.installed || [];
+      console.log('apps       :', apps.length, '->', apps.join(', '));
       p.kill();
     }
   }
