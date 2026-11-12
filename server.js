@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * artcraft-command-bridge — one MCP server for the 15 ArtCraft Crafting Apps.
+ * artcraft-command-bridge — one MCP server for the 19 ArtCraft Crafting Apps.
  *
  * Each Crafting App ships its own MCP server that exposes every engine
- * command as a separate tool (871 tools / 640.8 KB of schema in total). MCP
+ * command as a separate tool (978 tools / 773.1 KB of schema in total). MCP
  * clients register a server's tools in full, and that schema is re-sent on
- * every request — so connecting the 15 apps directly costs ~164k tokens of
+ * every request — so connecting the 19 apps directly costs ~198k tokens of
  * permanently resident context.
  *
  * This bridge talks to the apps' CLIs instead of their MCP servers and
@@ -19,7 +19,7 @@
 
 const fs = require('fs');
 
-const { APPS, APP_BY_ID, cleanupGeneratedFiles } = require('./lib/apps');
+const { APPS, cleanupGeneratedFiles } = require('./lib/apps');
 const { version: SERVER_VERSION } = require('./package.json');
 const { resolveCli, explain } = require('./lib/resolve');
 const { execFile, DEFAULT_CAPTURE_CHARS } = require('./lib/exec');
@@ -223,9 +223,17 @@ function parseJsonLines(text) {
   return out;
 }
 
+/** Lookup key for an app id: lower case, letters only ("craft-anything" -> "craftanything"). */
+function appKey(id) {
+  return String(id || '').toLowerCase().replace(/[^a-z]/g, '');
+}
+
+// Indexed by the normalized id, so "craft-anything", "craftanything" and
+// "Craft Anything" all reach the same app.
+const APP_BY_KEY = new Map(APPS.map((a) => [appKey(a.id), a]));
+
 function requireApp(id) {
-  const key = String(id || '').toLowerCase().replace(/[^a-z]/g, '');
-  const app = APP_BY_ID.get(key);
+  const app = APP_BY_KEY.get(appKey(id));
   if (!app) {
     throw new Error(`unknown app "${id}". available: ${APPS.map((a) => a.id).join(', ')}`);
   }
@@ -236,7 +244,7 @@ function requireApp(id) {
       `ARTCRAFT_${app.cliName.replace(/-/g, '_').toUpperCase()}_CLI. Probed: ${explain(app).slice(0, 6).join(' | ')}`
     );
   }
-  return { key, app, cli };
+  return { key: app.id, app, cli };
 }
 
 /* ------------------------------------------------------------------ tools */

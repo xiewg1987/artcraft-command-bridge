@@ -56,6 +56,9 @@ const SPECS = [
   { app: 'materialcraft', id: 'file.new', params: {}, ext: '.sbs' },
   { app: 'figcraft', id: 'node.create', params: { type: 'frame', name: 'OutputProbe', width: 100, height: 100 }, ext: '.figcraft' },
   { app: 'soundcraft', id: 'session.new', params: {}, ext: '.scraft' },
+  { app: 'anicraft', id: 'file.new', params: {}, ext: '.anicraft' },
+  { app: 'mailcraft', id: 'file.new', params: {}, ext: '.mailcraft' },
+  { app: 'solidcraft', id: 'sketch.create', params: { plane: 'XY' }, ext: '.sc' },
 ];
 
 (async () => {
@@ -137,6 +140,25 @@ const SPECS = [
       assert.strictEqual(result.exit_code, 0, result.stderr || 'TextureCraft input/output failed');
       assert(fs.existsSync(second));
       console.log('texturecraft  OK input + native output');
+    }
+
+    if (installed.has('craft-anything')) {
+      // Craft Anything has no run form: the bridge must refuse artcraft_run
+      // and point at the escape hatch instead.
+      const refused = await rpc('tools/call', {
+        name: 'artcraft_run',
+        arguments: { app: 'craft-anything', steps: [{ id: 'core-session-show', params: {} }] },
+      });
+      assert(refused.result?.isError, 'Craft Anything must refuse artcraft_run');
+      assert(
+        /artcraft_cli/.test(refused.result.content[0].text),
+        'the refusal must name the escape hatch'
+      );
+      const result = await call(rpc, 'artcraft_cli', {
+        app: 'craft-anything', args: ['core-session-show', '--format', 'json'],
+      });
+      assert.strictEqual(result.exit_code, 0, result.stderr || 'Craft Anything tool failed');
+      console.log('craft-anything OK run refused, cli tool ran');
     }
 
     console.log('PASS output-integration-test');

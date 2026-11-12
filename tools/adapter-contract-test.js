@@ -84,8 +84,54 @@ function hasPair(argv, flag, value) {
   const pdfSteps = JSON.parse(fs.readFileSync(pdfScript, 'utf8'));
   assert.deepStrictEqual(pdfSteps, [{ tool: 'probe.command', args: { value: 1 } }]);
 
+  // AniCraft takes the document first and a script of {cmd, params}.
+  const anicraft = build('anicraft');
+  assert.deepStrictEqual(anicraft.slice(0, 2), ['run', input]);
+  assert(hasPair(anicraft, '--save', output));
+  const anicraftScript = tempFilesOf(anicraft)[0];
+  assert(anicraftScript, 'AniCraft script is marked as generated');
+  assert.deepStrictEqual(
+    JSON.parse(fs.readFileSync(anicraftScript, 'utf8')),
+    [{ cmd: 'probe.command', params: { value: 1 } }]
+  );
+  const anicraftSample = APP_BY_ID.get('anicraft').build({ steps });
+  assert.strictEqual(anicraftSample[1], '--sample', 'AniCraft falls back to the sample animation');
+
+  // MailCraft speaks the --cmd 'id={json}' form and needs --print for results.
+  const mail = build('mailcraft');
+  assert(hasPair(mail, '--file', input));
+  assert(hasPair(mail, '--cmd', 'probe.command={"value":1}'));
+  assert(hasPair(mail, '--save', output));
+  assert(mail.includes('--print'), 'MailCraft writes results to stdout only with --print');
+  const mailSample = APP_BY_ID.get('mailcraft').build({ steps });
+  assert(mailSample.includes('--sample'), 'MailCraft falls back to the sample mailbox');
+
+  // SolidCraft takes a script of {command, params}; .sc saves, other formats export.
+  const solid = build('solidcraft');
+  assert.strictEqual(solid[0], 'run');
+  assert(hasPair(solid, '--in', input));
+  assert(hasPair(solid, '--out', output));
+  const solidScript = tempFilesOf(solid)[0];
+  assert(solidScript, 'SolidCraft script is marked as generated');
+  assert.deepStrictEqual(
+    JSON.parse(fs.readFileSync(solidScript, 'utf8')),
+    [{ command: 'probe.command', params: { value: 1 } }]
+  );
+  const solidNative = APP_BY_ID.get('solidcraft').build({
+    steps, output: path.join(root, 'part.sc'),
+  });
+  assert(hasPair(solidNative, '--save', path.join(root, 'part.sc')));
+
+  // Craft Anything has no run form: every tool is its own subcommand.
+  assert.throws(
+    () => APP_BY_ID.get('craft-anything').build({ steps }),
+    /artcraft_cli/,
+    'Craft Anything must point at the escape hatch instead of building argv'
+  );
+
   const generated = [design, grid, soundNative, soundBounce, deck, word, cad,
-    effect, film, fig, texture, material, pdf].flatMap(tempFilesOf);
+    effect, film, fig, texture, material, pdf, anicraft, anicraftSample, solid,
+    solidNative].flatMap(tempFilesOf);
   assert(generated.length >= 5, 'script-style apps expose their generated files');
 
   const userFile = path.join(root, 'do-not-delete.json');
@@ -95,7 +141,8 @@ function hasPair(argv, flag, value) {
   assert(fs.existsSync(userFile), 'cleanup must not delete arbitrary JSON files');
 
   for (const argv of [design, grid, soundNative, soundBounce, deck, word, cad,
-    effect, film, fig, texture, material, pdf]) cleanupGeneratedFiles(argv);
+    effect, film, fig, texture, material, pdf, anicraft, anicraftSample, solid,
+    solidNative]) cleanupGeneratedFiles(argv);
   assert(generated.every((file) => !fs.existsSync(file)), 'generated scripts are removed');
   assert(fs.existsSync(userFile), 'user-owned file survives cleanup');
 

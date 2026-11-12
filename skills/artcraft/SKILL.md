@@ -1,6 +1,6 @@
 ---
 name: artcraft
-description: Route deterministic creative-file work to the correct ArtCraft app and drive it through artcraft-command-bridge. Use for photo/RAW, vector/UI/print, spreadsheets, documents/slides, audio/video/motion, CAD, 2D/3D textures/materials and PDFs.
+description: Route deterministic creative-file work to the correct ArtCraft app and drive it through artcraft-command-bridge. Use for photo/RAW, vector/UI/print, spreadsheets, documents/slides, audio/video/motion, 2D animation, CAD, 3D solids, 2D/3D textures/materials, mail and PDFs.
 ---
 
 # ArtCraft: choose an app, discover, run, verify
@@ -33,12 +33,16 @@ Call `artcraft_apps` without arguments. Its compact result contains `installed`,
 | `soundcraft` | audio edit, podcast, mix/master | video editing |
 | `filmcraft` | live-action timeline, captions, MP4 | motion-graphics comps |
 | `effectcraft` | motion graphics, keyframes, titles | live-action editing |
-| `cadcraft` | CAD drawings, dimensions, DXF/DWG | illustration |
+| `anicraft` | 2D vector animation, tweens, timelines, GIF | motion-graphics comps; live action |
+| `cadcraft` | CAD drawings, dimensions, DXF/DWG | illustration; 3D solids |
+| `solidcraft` | 3D solids, STEP drawings, STL/OBJ export | 2D drafting; texture painting |
 | `texturecraft` | painting/baking maps on a mesh | reusable procedural material graphs |
 | `materialcraft` | procedural PBR graphs and material packages | painting a specific mesh |
 | `pdfcraft` | PDF input operations, forms, OCR, redaction | source-document authoring; ordinary PDF export |
+| `mailcraft` | email, contacts, calendar, mailbox files | authoring a document |
+| `craft-anything` | understanding an unknown binary/app/site; rebuilds | any file the other apps own |
 
-Ambiguities: screen → `figcraft`; printed page → `designcraft`; slide → `deckcraft`; still image → `photocraft`; editable path art → `vectorcraft`; RAW → `lightcraft`; PDF as input → `pdfcraft`; PDF merely as an export → use the source app.
+Ambiguities: screen → `figcraft`; printed page → `designcraft`; slide → `deckcraft`; still image → `photocraft`; editable path art → `vectorcraft`; RAW → `lightcraft`; 2D animation → `anicraft`; motion graphics → `effectcraft`; 2D drafting → `cadcraft`; 3D solids → `solidcraft`; PDF as input → `pdfcraft`; PDF merely as an export → use the source app; mail → `mailcraft`; reverse engineering a foreign binary → `craft-anything`.
 
 ## 3. Discover commands
 
@@ -55,6 +59,7 @@ Ambiguities: screen → `figcraft`; printed page → `designcraft`; slide → `d
 - `ids` accepts at most six commands. Each `params` string is capped at 2,400 chars by default. If `params_truncated` is true, re-query only that ID with a larger `max_param_chars` (max 12,000).
 - Use `refresh:true` only after an app update. Use `cache_info:true` only for diagnostics.
 - PdfCraft parameter strings are JSON Schemas. Its tools are stateful: keep `doc_open` and later steps in one `artcraft_run` call.
+- Craft Anything has no `params` in its registry — every tool is its own subcommand. Read a tool's options with `artcraft_help` and `args:["<tool-id>","--help"]`.
 
 ## 4. Execute
 
@@ -78,16 +83,22 @@ Ambiguities: screen → `figcraft`; printed page → `designcraft`; slide → `d
 
 Common support:
 
-- Full generic file input/output: PhotoCraft, VectorCraft, SoundCraft, FilmCraft, FigCraft, EffectCraft, TextureCraft, MaterialCraft.
+- Full generic file input/output: PhotoCraft, VectorCraft, SoundCraft, FilmCraft, FigCraft, EffectCraft, TextureCraft, MaterialCraft, AniCraft, MailCraft, SolidCraft.
 - File export through `output`: DesignCraft, GridCraft, DeckCraft, WordCraft, CADCraft.
 - SoundCraft `.scraft` saves a session; audio extensions use bounce.
 - TextureCraft/MaterialCraft `output` saves the native project. Export PNG/EXR maps with `artcraft_cli export`.
 - LightCraft uses CLI-specific `--import`, `--library`, `--script`, render or export paths through `artcraft_cli`.
 - PdfCraft `output` is mainly for image-producing tools; document outputs normally come from the selected tool parameters.
+- AniCraft takes the document first; without `input` it runs on the sample animation. `output` saves the `.anicraft` document.
+- SolidCraft `output` ending in `.sc` saves the native design; any other extension exports a mesh (STL/OBJ/3MF).
+- MailCraft `output` saves the mailbox file (`.mailcraft`).
+- Craft Anything has no run form: use `artcraft_cli` with the tool name.
 
 ## 5. Escape hatch
 
 Use `artcraft_cli` for `export`, `render`, `convert`, `info`, folder batches and app-specific subcommands that are not command IDs. Arguments are passed without shell interpretation. JSON stdout is parsed automatically; raw stdout is opt-in.
+
+Craft Anything lives here: one tool per call, e.g. `{"app":"craft-anything","args":["core-target-open","--format","json"]}`. `artcraft_run` refuses it. Check which tools are usable with `artcraft_cli` and `args:["capabilities"]`.
 
 For an image preview, add `preview:"auto"` and either an image `-o`/`--out`/`--export` path or `preview_file`. Use `artcraft_help` when flags are uncertain; its output is capped at 6,000 chars by default.
 

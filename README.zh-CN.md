@@ -2,17 +2,17 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-**一个 MCP 服务器管住 15 个 [ArtCraft Crafting Apps](https://getartcraft.com/apps) —— 5 个工具顶替 871 个。**
+**一个 MCP 服务器管住 19 个 [ArtCraft Crafting Apps](https://getartcraft.com/apps) —— 5 个工具顶替 978 个。**
 
 `artcraft-command-bridge` 是一个驱动本机 ArtCraft CLI 的 MCP 服务器。它是**桥接器**，不是安装器或更新器：用 ArtCraft Launcher（或各 App 的独立安装包）安装和更新 App，然后让这个服务器通过 5 个工具把它们交给你的 agent。
 
-每个 Crafting App 都自带 MCP 服务器，把每条引擎命令摊成独立工具。15 个全装 = **871 个工具 / 640.8 KB schema ≈ 16.4 万 token** 常驻上下文，而且每轮请求都要重发一遍。这个桥接器把同一份命令注册表收进一个**目录**和一个**分发器**：
+每个 Crafting App 都自带 MCP 服务器，把每条引擎命令摊成独立工具。19 个全装 = **978 个工具 / 773.1 KB schema ≈ 19.8 万 token** 常驻上下文，而且每轮请求都要重发一遍。这个桥接器把同一份命令注册表收进一个**目录**和一个**分发器**：
 
 ```text
-871 工具 · 640.8 KB · ~164,000 token   →   5 工具 · 4.8 KB · ~1,200 token
+978 工具 · 773.1 KB · ~198,000 token   →   5 工具 · 4.8 KB · ~1,200 token
 ```
 
-2026-11-08 在 Windows 上装齐 15 个 App 后实测。
+2026-11-12 在 Windows 上装齐 19 个 App 后实测。
 
 ---
 
@@ -25,9 +25,9 @@ Crafting Apps 本身已经有一套非常适合做这件事的模型：
 - `commands` —— 列出稳定命令 ID 及其参数
 - `run` / `batch` —— 按 ID 执行
 
-15 个 App 在 2026-11-08 实测共 **7748 条命令 ID**。而原厂 MCP 暴露的 871 个工具，只是同一份注册表的一个子集视图。所以这些工具不需要被摊平成 871 条并列项 —— 它们需要的是一份**目录**和一个**分发器**，这就是这个桥接器。
+19 个 App 在 2026-11-12 实测共 **9878 条命令 ID**。而原厂 MCP 暴露的 978 个工具，只是同一份注册表的一个子集视图。所以这些工具不需要被摊平成 978 条并列项 —— 它们需要的是一份**目录**和一个**分发器**，这就是这个桥接器。
 
-只有 PdfCraft 自带一个接近按需的模式（`pdfcraft-cli mcp --compact`，只暴露核心工具 + `tool_search`/`tool_call`）；另外 14 个没有等价的 `--compact` 模式，所以没有统一开关可开。
+只有 PdfCraft 自带一个接近按需的模式（`pdfcraft-cli mcp --compact`，只暴露核心工具 + `tool_search`/`tool_call`）；另外 18 个没有等价的 `--compact` 模式，所以没有统一开关可开。
 
 ## 快速开始
 
@@ -80,7 +80,7 @@ skill，请把该目录复制或链接到客户端配置的 skills 目录。
 
 ### 3. 重启并确认
 
-重启客户端让工具加载。然后调用 `artcraft_apps`：它会列出全部 15 个 App，`installed_count` 表示本机实际安装了几个。
+重启客户端让工具加载。然后调用 `artcraft_apps`：它会列出全部 19 个 App，`installed_count` 表示本机实际安装了几个。
 
 ## 5 个工具
 
@@ -102,47 +102,71 @@ skill，请把该目录复制或链接到客户端配置的 skills 目录。
 - 图片预览**默认关闭**。需要视觉验收时显式传 `preview:"auto"` 或 `"image"`；最多 1 张，最长边超过 1,024px 或文件超过 4MB 时只返回警告。
 - MCP 文本内容是紧凑 JSON；重复的 `structuredContent` 默认关闭。只有客户端确实依赖它时才设置 `ARTCRAFT_STRUCTURED=1`。
 
-## 15 个 App
+## 19 个 App
 
 | App | 适合做什么 | `run` 风格 | 注册表 |
 |---|---|---|---|
 | **PhotoCraft** (`photocraft`) | 像素编辑、图层、蒙版、PSD | `cmd-params` | `commands --json` |
 | **LightCraft** (`lightcraft`) | RAW 显影、选片、批量变体 | `positional` | `commands --json` |
 | **VectorCraft** (`vectorcraft`) | Logo、图标、路径、印刷矢量 | `cmd-params` | `commands --json` |
+| **AniCraft** (`anicraft`) | 2D 矢量动画、补间、时间轴、GIF | `script-json-cmd` | `commands`（JSON） |
+| **FigCraft** (`figcraft`) | UI 界面、组件、原型 | `script-json` | `commands --json` |
 | **DesignCraft** (`designcraft`) | 多页印刷、主页、PDF/X | `cmd-inline-eq` | `commands`（JSON） |
 | **GridCraft** (`gridcraft`) | 表格、公式、图表 | `cmd-inline-eq` | `commands --json` |
 | **SoundCraft** (`soundcraft`) | 音频剪辑、播客、混音/母带 | `cmd-inline-eq` | `commands`（文本表） |
 | **DeckCraft** (`deckcraft`) | 幻灯片、pptx | `cmd-inline-eq` | `commands`（文本表） |
 | **WordCraft** (`wordcraft`) | 长文档、报告、docx | `cmd-inline-eq` | `commands --json` |
-| **CADCraft** (`cadcraft`) | CAD 制图、尺寸、DXF/DWG | `cmd-inline-sp` | `commands`（JSON） |
+| **CADCraft** (`cadcraft`) | 2D CAD 制图、尺寸、DXF/DWG | `cmd-inline-sp` | `commands`（JSON） |
+| **SolidCraft** (`solidcraft`) | 3D 实体、STEP 图纸、STL/OBJ 导出 | `script-json` | `commands`（JSON） |
 | **EffectCraft** (`effectcraft`) | 动态图形、关键帧、合成 | `positional` | `commands --json` |
 | **FilmCraft** (`filmcraft`) | 视频时间线、剪辑、字幕、MP4 | `script-jsonl` | `commands --json` |
-| **FigCraft** (`figcraft`) | UI 界面、组件、原型 | `script-json` | `commands --json` |
 | **TextureCraft** (`texturecraft`) | 3D 贴图集、绘制、烘焙 | `batch-json` | `commands`（文本表） |
 | **MaterialCraft** (`materialcraft`) | 程序化 PBR 材质、节点图 | `batch-json` | `commands`（JSON） |
 | **PdfCraft** (`pdfcraft`) | PDF 合并/拆分、表单、OCR、脱敏 | `tool-script` | `tools` |
+| **MailCraft** (`mailcraft`) | 邮件、联系人、日历、邮箱文件 | `cmd-inline-eq` | `commands --json` |
+| **Craft Anything** (`craft-anything`) | 逆向理解陌生的二进制/App/网站 | `cli-only` | `commands`（JSON） |
 
 风格速查：
 
 ```text
 cmd-params      --cmd <id> --params <json>        PhotoCraft, VectorCraft
 cmd-inline-eq   --cmd <id>={<json>}               DesignCraft, GridCraft, SoundCraft,
-                                                   DeckCraft, WordCraft
+                                                   DeckCraft, WordCraft, MailCraft
 cmd-inline-sp   --cmd '<id> <json>'                CADCraft
 positional      <id> <json>                       LightCraft, EffectCraft
-script-json     run <script.json>                 FigCraft ({command, params})
-script-jsonl    run <script.jsonl>                FilmCraft ({id, params})
+script-json     run <script.json>                 FigCraft, SolidCraft
+                                                   ({command, params})
+script-json-cmd run <doc> <script.json>           AniCraft（{cmd, params}）
+script-jsonl    run <script.jsonl>                FilmCraft（{id, params}）
 batch-json      batch <script.json>               TextureCraft, MaterialCraft
                                                    ({open, steps, save})
-tool-script     run --script steps.json          PdfCraft（{tool, args}）
+tool-script     run --script steps.json           PdfCraft（{tool, args}）
+cli-only        <tool> [args]                     Craft Anything（一个工具一个
+                                                   子命令，没有 run 形态）
 ```
 
 注册表说明：
 
 - `commands --json` 是首选形态。
 - CADCraft/DesignCraft 会把 `--json` 当过滤词并返回 `[]`；MaterialCraft 把 `--json` 当未知选项。桥接器会回退到纯 `commands`。
+- AniCraft 把 `--json` 当成需要取值的开关会直接报错；它的纯 `commands` 本来就输出 JSON。
 - DeckCraft/SoundCraft/TextureCraft 输出纯文本表。
 - PdfCraft 没有 `commands`；桥接器把它的 `tools` 列表归一化成同样的形状。
+- Craft Anything 把工具 ID 叫 `command`、标题叫 `title`、摘要叫 `summary`；桥接器映射成 `id` / `label` / `description`。
+- MailCraft 只有加 `--print` 才往 stdout 写结果；桥接器会自动带上。
+
+## Craft Anything 是另一种形态
+
+Craft Anything 不是 `commands` + `run` 引擎，而是一个 agent 前端：**每个工具都是自己的子命令**（`core-target-open`、`core-session-show`……），没有脚本可以交给桥接器。
+
+所以桥接器把它当作 `cli-only`：
+
+- `artcraft_commands` 给出它 323 个工具的目录 —— ID、标题、摘要、所属 toolset。
+- `artcraft_cli` 原样执行单个工具，例如
+  `{"app":"craft-anything","args":["core-session-show","--format","json"]}`。
+- `artcraft_run` 会拒绝它，并指向逃生舱。
+
+单个工具的参数不在注册表里；用 `artcraft_help` 传 `args:["core-target-open","--help"]` 读。哪些工具当前可用取决于已装的引擎和 Clean room / Deep 模式 —— 跑 `artcraft_cli` 的 `args:["capabilities"]` 查。
 
 ## 用法示例
 
@@ -169,6 +193,15 @@ tool-script     run --script steps.json          PdfCraft（{tool, args}）
   "preview": "auto"
 }
 
+// 在动画舞台上画一笔并保存文档
+{
+  "app": "anicraft",
+  "steps": [
+    { "id": "draw.rect", "params": { "x": 10, "y": 10, "w": 80, "h": 40 } }
+  ],
+  "output": "D:/out/scene.anicraft"
+}
+
 // 画一层贴图并保存原生工程（batch-json 风格）
 {
   "app": "texturecraft",
@@ -185,6 +218,21 @@ tool-script     run --script steps.json          PdfCraft（{tool, args}）
     { "id": "graph.seed", "params": { "seed": 7 } }
   ],
   "output": "D:/out/brick.sbs"
+}
+
+// 建一个实体并导出网格
+{
+  "app": "solidcraft",
+  "steps": [
+    { "id": "sketch.create", "params": { "plane": "XY" } }
+  ],
+  "output": "D:/out/part.stl"
+}
+
+// Craft Anything：一个工具一个子命令
+{
+  "app": "craft-anything",
+  "args": ["core-session-show", "--format", "json"]
 }
 ```
 
@@ -204,9 +252,11 @@ node tools/sync-registry.js --clear    # 清空缓存
 
 缓存命中省掉的是 CLI 进程，不会缩小返回内容：token 消耗取决于返回的命令列表，而不是它从哪里读出来。用 `filter` 和 `limit` 控制列表大小。
 
+注册表已经涨过小缓冲：VectorCraft 的 JSON 约 829 KB，PhotoCraft 约 428 KB，SolidCraft 约 397 KB。桥接器会**完整读取**每一份注册表；解析失败的读数**不会进缓存**，所以一次坏读不会把某个 App 冻在“没有命令”状态直到它的二进制发生变化。
+
 ### 安装或更新 App 之后
 
-注册表缓存会自动处理 CLI 的变化。但 App **目录**是在桥接器启动时加载的，所以新增或移除 App 后要重启 MCP 客户端。然后调用 `artcraft_apps`：它会列出全部 15 个条目，`installed_count` 表示本机实际安装了几个。如果仍看到旧列表，检查客户端启动的是哪个 `server.js` —— 进程命令行应该指向当前这份 checkout，而不是旧副本。
+注册表缓存会自动处理 CLI 的变化。但 App **目录**是在桥接器启动时加载的，所以新增或移除 App 后要重启 MCP 客户端。然后调用 `artcraft_apps`：它会列出全部 19 个条目，`installed_count` 表示本机实际安装了几个。如果仍看到旧列表，检查客户端启动的是哪个 `server.js` —— 进程命令行应该指向当前这份 checkout，而不是旧副本。
 
 ## 怎么找到 CLI
 
@@ -221,22 +271,30 @@ node tools/sync-registry.js --clear    # 清空缓存
    （`C:\Program Files\<App>Craft\`、`/Applications/<App>Craft.app/Contents/MacOS/`、
    `/usr/local/bin`）
 
+Windows 上有两个 App 不用标准的 `<App>Craft` 目录：AniCraft 装在
+`C:\Program Files\ArtCraft\AniCraft\`，Craft Anything 装在
+`C:\Program Files\Craft Anything\`。两者都在探测范围内。
+
 没装的 App 会被标成未安装并跳过 —— 少装一个不会让整个桥接器挂掉。
 
 ## 范围与限制
 
-- **15 个由命令驱动的 Crafting App。** Craft Anything 是一个带自有工具协议的 agent 前端，不是 `commands` + `run`/`batch` 引擎，所以桥接器不包装它。
+- **19 个 Crafting App。** 其中 18 个由 `commands` + `run`/`batch` 驱动。Craft Anything 同样是命令驱动，但每个工具都是自己的子命令，所以它以「目录 + 逃生舱」的形式暴露，不走 `artcraft_run`。
 - **桥接器不安装、不更新、不启动 GUI App。** 这些交给 ArtCraft Launcher 或各 App 的安装包。
+- **MailCraft 和 SolidCraft 还没进入公开 App 列表。** 部分机器上由 Launcher 装上，这里照样接了，桥接器能驱动它们；没装的机器上它们只是显示为缺失。
 - **`input`/`output` 支持情况不同：**
-  - 两者都支持：PhotoCraft、VectorCraft、SoundCraft、FilmCraft、FigCraft、EffectCraft、TextureCraft、MaterialCraft
+  - 两者都支持：PhotoCraft、VectorCraft、SoundCraft、FilmCraft、FigCraft、EffectCraft、TextureCraft、MaterialCraft、AniCraft、MailCraft、SolidCraft
   - 运行/文件输出：DesignCraft、GridCraft、DeckCraft、WordCraft、CADCraft
   - 图片输出：PdfCraft（render/图片类工具使用 `--out`）
   - 需走各自导入/导出流程：LightCraft
+  - Craft Anything：没有 run 形态 —— 走 `artcraft_cli`
 - **TextureCraft / MaterialCraft** 使用 batch JSON 脚本。`output` 保存原生工程（`.tcraft` / `.sbs`）；PNG/EXR 贴图导出走 `artcraft_cli export`。
+- **AniCraft** 的文档参数在前（`run <file|--sample> <script.json>`）。不给 `input` 就跑在示例动画上；脚本条目是 `{cmd, params}`。
+- **SolidCraft** 的 `output` 以 `.sc` 结尾时保存原生设计（`.sc`），其他扩展名导出网格（STL/OBJ/3MF）。
 
 ## 和现有方案的差别
 
-- **[eznix86/mcp-gateway](https://github.com/eznix86/mcp-gateway)**（MIT）—— 思路一样的通用网关，但它聚合的是 **MCP 服务器层**，那 15 个 Crafting App 服务器还是得作为上游进程常驻，而且它的 `search` 是文本相似度，不是注册表精确查。
+- **[eznix86/mcp-gateway](https://github.com/eznix86/mcp-gateway)**（MIT）—— 思路一样的通用网关，但它聚合的是 **MCP 服务器层**，那 19 个 Crafting App 服务器还是得作为上游进程常驻，而且它的 `search` 是文本相似度，不是注册表精确查。
 - **[ai-2070/claude-storytold-skills](https://github.com/ai-2070/claude-storytold-skills)**（MIT）—— Claude Code 插件，每个 App 一个 skill，用 grep 查生成的命令目录。同一目标，不同层次：它照样用 `claude mcp add` 把每个 App 的 MCP server 注册进去，schema 依然常驻。
 - **[smyrgeorge/artcraft-toolbox](https://github.com/smyrgeorge/artcraft-toolbox)**（Apache-2.0）—— 套件**管理器**（安装、校验、更新、启动）。两者互补：toolbox 负责把 App 弄到机器上，这个桥接器负责让它们好用。
 

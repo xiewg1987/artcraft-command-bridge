@@ -20,6 +20,8 @@ const {
   inspectBase64Image,
   inferOutputPath,
 } = require('../lib/preview');
+const { APPS } = require('../lib/apps');
+const { resolveCli } = require('../lib/resolve');
 
 const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n1cAAAAASUVORK5CYII=';
 const B64 = 'A'.repeat(8192);
@@ -70,14 +72,17 @@ function imagesOf(result) {
   return result.content.filter((item) => item.type === 'image');
 }
 
+let server = null;
+
 (async () => {
   const { p, rpc } = start();
+  server = p;
   const init = await rpc('initialize', {
     protocolVersion: '2024-11-05',
     capabilities: {},
     clientInfo: { name: 'token-size-test', version: '2' },
   });
-  assert.strictEqual(init.result.serverInfo.version, '2.0.0');
+  assert.strictEqual(init.result.serverInfo.version, '2.1.0');
   p.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
 
   const list = await rpc('tools/list', {});
@@ -88,13 +93,16 @@ function imagesOf(result) {
 
   let result = await call(rpc, 'artcraft_apps', {});
   let data = dataOf(result);
-  assert.strictEqual(data.installed_count, 15);
+  // Every app that resolves on this machine must be reported as installed.
+  const resolvable = APPS.filter((app) => resolveCli(app)).length;
+  assert.strictEqual(data.installed_count, resolvable);
+  assert.strictEqual(data.installed.length, resolvable);
   assert(Array.isArray(data.installed));
   assert(!('apps' in data));
   assert(!result.structuredContent, 'structuredContent is opt-in');
   const appsChars = textOf(result).length;
-  assert(appsChars < 500, `compact app list should stay small (got ${appsChars})`);
-  console.log(`artcraft_apps compact: ${appsChars} chars`);
+  assert(appsChars < 700, `compact app list should stay small (got ${appsChars})`);
+  console.log(`artcraft_apps compact: ${appsChars} chars (${resolvable}/${APPS.length} apps)`);
 
   result = await call(rpc, 'artcraft_commands', { app: 'pdfcraft' });
   data = dataOf(result);
@@ -287,4 +295,8 @@ function imagesOf(result) {
 })().catch((error) => {
   console.error(`\nFAIL token-size-test: ${error.stack || error.message}`);
   process.exitCode = 1;
+}).finally(() => {
+  // Always stop the bridge: a live child keeps the event loop alive, so a
+  // failed assertion would otherwise hang the test instead of failing it.
+  if (server) { try { server.kill(); } catch (e) { /* ignore */ } }
 });

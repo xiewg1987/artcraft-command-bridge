@@ -1,7 +1,7 @@
 {
   "name": "artcraft-command-bridge",
-  "version": "2.0.0",
-  "description": "One compact MCP bridge for the 15 ArtCraft apps: 5 tools instead of 871, on-demand discovery and token-bounded results.",
+  "version": "2.1.0",
+  "description": "One compact MCP bridge for the 19 ArtCraft apps: 5 tools instead of 978, on-demand discovery and token-bounded results.",
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -11,6 +11,10 @@
     "vectorcraft",
     "lightcraft",
     "designcraft",
+    "anicraft",
+    "solidcraft",
+    "mailcraft",
+    "craft-anything",
     "texturecraft",
     "materialcraft",
     "deterministic",
